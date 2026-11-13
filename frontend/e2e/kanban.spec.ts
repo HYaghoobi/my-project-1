@@ -4,7 +4,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
 
-test("shows the sample board in Persian with exactly five columns", async ({
+test("shows the sample board in Persian with six fixed columns", async ({
   page,
 }) => {
   await expect(page.locator("html")).toHaveAttribute("lang", "fa");
@@ -18,12 +18,23 @@ test("shows the sample board in Persian with exactly five columns", async ({
     page.getByRole("link", { name: "مدیر پروژه، صفحهٔ اصلی" }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "تختهٔ تیم محصول" })).toBeVisible();
-  await expect(page.getByTestId(/^kanban-column-/)).toHaveCount(5);
+  await expect(page.getByTestId(/^kanban-column-/)).toHaveCount(6);
+  for (const name of [
+    "برای انجام",
+    "در حال انجام",
+    "انجام‌شده",
+    "در انتظار تأیید",
+    "پروژه‌های در انتظار",
+    "پروژه‌های اتمام‌شده",
+  ]) {
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+  }
   await expect(page.getByText("بازنویسی متن صفحهٔ اصلی")).toBeVisible();
+  await expect(page.getByTestId("card-count")).toHaveText("9");
 });
 
 test("adds and removes a card", async ({ page }) => {
-  await page.getByRole("button", { name: "افزودن کارت به ایده‌ها" }).click();
+  await page.getByRole("button", { name: "افزودن کارت به برای انجام" }).click();
   await page.getByLabel("عنوان کارت").fill("آزمون جریان جدید");
   await page.getByLabel("جزئیات کارت").fill("این کارت برای آزمودن رابط ساخته شده است.");
   await page.getByRole("button", { name: "ثبت کارت" }).click();
@@ -36,7 +47,7 @@ test("adds and removes a card", async ({ page }) => {
 });
 
 test("renames a column", async ({ page }) => {
-  await page.getByRole("button", { name: "تغییر نام ستون ایده‌ها" }).click();
+  await page.getByRole("button", { name: "تغییر نام ستون برای انجام" }).click();
   const nameInput = page.getByRole("textbox", { name: "نام ستون" });
 
   await nameInput.fill("ایده‌های تازه");
@@ -45,59 +56,39 @@ test("renames a column", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "ایده‌های تازه" }),
   ).toBeVisible();
-  await expect(page.getByTestId(/^kanban-column-/)).toHaveCount(5);
+  await expect(page.getByRole("textbox", { name: "نام ستون" })).toHaveCount(0);
+  await expect(page.getByTestId(/^kanban-column-/)).toHaveCount(6);
 });
 
-test("adds a column to the left without shrinking existing columns", async ({
+test("closes the column editor on Enter when the name is blank", async ({
   page,
 }) => {
-  const board = page.getByTestId("board-columns");
-  const ideasColumn = page.getByTestId("kanban-column-ideas");
-  const doneColumn = page.getByTestId("kanban-column-done");
-  const originalIdeasWidth = (await ideasColumn.boundingBox())?.width;
-  const originalDoneWidth = (await doneColumn.boundingBox())?.width;
+  await page.getByRole("button", { name: "تغییر نام ستون برای انجام" }).click();
+  const nameInput = page.getByRole("textbox", { name: "نام ستون" });
 
-  const ideasBefore = await ideasColumn.boundingBox();
-  const plannedBefore = await page
-    .getByTestId("kanban-column-planned")
-    .boundingBox();
-  expect(ideasBefore?.x).toBeGreaterThan(plannedBefore?.x ?? 0);
+  await nameInput.fill(" ");
+  await nameInput.press("Enter");
 
-  await page.getByRole("button", { name: "افزودن ستون دیگر" }).click();
-  await page.getByRole("textbox", { name: "نام ستون جدید" }).fill("انتشار");
-  await page.getByRole("button", { name: "افزودن", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "برای انجام" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "نام ستون" })).toHaveCount(0);
+});
 
-  await expect(page.getByTestId(/^kanban-column-/)).toHaveCount(6);
-  const newColumn = page.getByTestId(/^kanban-column-/).filter({
-    has: page.getByRole("heading", { name: "انتشار" }),
-  });
-  await expect(newColumn).toBeVisible();
-  await expect(page.getByTestId("card-count")).toHaveText("9");
+test("edits a card title and details", async ({ page }) => {
+  const card = page.getByTestId("kanban-card-brand-story");
+  await card.getByRole("button", { name: "ویرایش کارت روایت تازه برای برند" }).click();
+  await card.getByLabel("عنوان کارت").fill("روایت بازنگری‌شده");
+  await card.getByLabel("جزئیات کارت").fill("جزئیات بازنگری‌شده");
+  await card.getByRole("button", { name: "ذخیره تغییرات" }).click();
 
-  await expect.poll(() => board.evaluate((element) => element.scrollLeft)).toBeLessThan(0);
-  const [dimensions, ideasAfter, doneAfter, newColumnAfter] = await Promise.all([
-    board.evaluate((element) => ({
-      clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
-      scrollLeft: element.scrollLeft,
-    })),
-    ideasColumn.boundingBox(),
-    doneColumn.boundingBox(),
-    newColumn.boundingBox(),
-  ]);
-
-  expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
-  expect(dimensions.scrollLeft).toBeLessThan(0);
-  expect(ideasAfter?.width).toBe(originalIdeasWidth);
-  expect(doneAfter?.width).toBe(originalDoneWidth);
-  expect(newColumnAfter?.x).toBeLessThan(doneAfter?.x ?? 0);
+  await expect(card.getByRole("heading", { name: "روایت بازنگری‌شده" })).toBeVisible();
+  await expect(card.getByText("جزئیات بازنگری‌شده")).toBeVisible();
 });
 
 test("moves a card to another column", async ({ page }) => {
   const card = page.getByTestId("kanban-card-product-copy");
   const handle = card.getByTestId("drag-handle");
   const destination = page
-    .getByTestId("kanban-column-review")
+    .getByTestId("kanban-column-awaiting-approval")
     .locator(".card-list");
 
   const sourceBox = await handle.boundingBox();
@@ -123,7 +114,9 @@ test("moves a card to another column", async ({ page }) => {
   await page.mouse.up();
 
   await expect(
-    page.getByTestId("kanban-column-review").getByText("بازنویسی متن صفحهٔ اصلی"),
+    page.getByTestId("kanban-column-awaiting-approval").getByText(
+      "بازنویسی متن صفحهٔ اصلی",
+    ),
   ).toBeVisible();
   await expect(
     page.getByTestId("kanban-column-in-progress").getByText(
@@ -133,7 +126,7 @@ test("moves a card to another column", async ({ page }) => {
 });
 
 test("reorders cards within the same column", async ({ page }) => {
-  const column = page.getByTestId("kanban-column-ideas");
+  const column = page.getByTestId("kanban-column-todo");
   const source = page
     .getByTestId("kanban-card-onboarding")
     .getByTestId("drag-handle");
@@ -164,6 +157,46 @@ test("reorders cards within the same column", async ({ page }) => {
     "data-testid",
     "kanban-card-onboarding",
   );
+});
+
+test("reorders columns without moving their cards", async ({ page }) => {
+  const sourceColumn = page.getByTestId("kanban-column-in-progress");
+  const targetColumn = page.getByTestId("kanban-column-todo");
+  const sourceHandle = sourceColumn.getByTestId("column-drag-handle");
+  const targetHeader = targetColumn.locator(".column-header");
+  const sourceBox = await sourceHandle.boundingBox();
+  const targetBox = await targetHeader.boundingBox();
+
+  if (!sourceBox || !targetBox) {
+    throw new Error("Unable to locate the columns to reorder");
+  }
+
+  const start = {
+    x: sourceBox.x + sourceBox.width / 2,
+    y: sourceBox.y + sourceBox.height / 2,
+  };
+  const end = {
+    x: targetBox.x + targetBox.width / 2,
+    y: targetBox.y + targetBox.height / 2,
+  };
+
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(start.x + 8, start.y, { steps: 2 });
+  await page.mouse.move(end.x, end.y, { steps: 16 });
+  await page.mouse.up();
+
+  const columns = page.getByTestId("board-columns").locator(".kanban-column");
+  await expect(columns.nth(0)).toHaveAttribute(
+    "data-testid",
+    "kanban-column-in-progress",
+  );
+  await expect(columns.nth(0).getByText("بازنویسی متن صفحهٔ اصلی")).toBeVisible();
+  await expect(columns.nth(1)).toHaveAttribute(
+    "data-testid",
+    "kanban-column-todo",
+  );
+  await expect(columns.nth(1).getByText("روایت تازه برای برند")).toBeVisible();
 });
 
 test("keeps the columns horizontally scrollable on a small screen", async ({

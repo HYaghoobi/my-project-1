@@ -14,6 +14,7 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import {
+  horizontalListSortingStrategy,
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
@@ -36,18 +37,18 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import {
-  useRef,
   useState,
   type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
 } from "react";
 import {
-  addColumn,
   addCard,
   countCards,
   deleteCard,
+  editCard,
   initialBoard,
+  moveColumn,
   moveCard,
   renameColumn,
   type Board,
@@ -55,14 +56,27 @@ import {
   type Column,
 } from "@/lib/board";
 
-const columnDropPrefix = "column:";
+const columnDropPrefix = "column-drop:";
+const sortableColumnPrefix = "sortable-column:";
 
 const boardCollisionDetection: CollisionDetection = (args) => {
+  const isColumnDrag = args.active.data.current?.type === "column";
+  if (isColumnDrag) {
+    return closestCorners({
+      ...args,
+      droppableContainers: args.droppableContainers.filter(({ id }) =>
+        String(id) !== String(args.active.id) &&
+        String(id).startsWith(sortableColumnPrefix),
+      ),
+    });
+  }
+
   const pointerCollisions = pointerWithin(args);
   const cardCollisions = pointerCollisions.filter(
     ({ id }) =>
       String(id) !== String(args.active.id) &&
-      !String(id).startsWith(columnDropPrefix),
+      !String(id).startsWith(columnDropPrefix) &&
+      !String(id).startsWith(sortableColumnPrefix),
   );
   if (cardCollisions.length > 0) return cardCollisions;
 
@@ -71,16 +85,20 @@ const boardCollisionDetection: CollisionDetection = (args) => {
   );
   return columnCollisions.length > 0
     ? columnCollisions
-    : closestCorners(args);
+    : closestCorners({
+        ...args,
+        droppableContainers: args.droppableContainers.filter(
+          ({ id }) => !String(id).startsWith(sortableColumnPrefix),
+        ),
+      });
 };
 
 export default function Home() {
   const [board, setBoard] = useState<Board>(initialBoard);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
-  const [isAddingColumn, setIsAddingColumn] = useState(false);
-  const boardColumnsRef = useRef<HTMLDivElement>(null);
+  const [activeColumnId, setActiveColumnId] = useState<string | null>(null);
   const boardStyle: CSSProperties & { "--column-count": number } = {
-    "--column-count": board.length + 1,
+    "--column-count": board.length,
   };
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -91,12 +109,27 @@ export default function Home() {
   const activeCard = board
     .flatMap((column) => column.cards)
     .find((card) => card.id === activeCardId);
+  const activeColumn = board.find((column) => column.id === activeColumnId);
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveCardId(null);
+    setActiveColumnId(null);
     if (!event.over) return;
 
     const overId = String(event.over.id);
+    if (event.active.data.current?.type === "column") {
+      if (overId.startsWith(sortableColumnPrefix)) {
+        setBoard((currentBoard) =>
+          moveColumn(
+            currentBoard,
+            String(event.active.id).slice(sortableColumnPrefix.length),
+            overId.slice(sortableColumnPrefix.length),
+          ),
+        );
+      }
+      return;
+    }
+
     const destinationColumn = board.find(
       (column) =>
         `${columnDropPrefix}${column.id}` === overId ||
@@ -127,24 +160,6 @@ export default function Home() {
         details,
       }),
     );
-  }
-
-  function handleAddColumn(name: string) {
-    const columnName = name.trim();
-    if (!columnName) return;
-
-    setBoard((currentBoard) =>
-      addColumn(currentBoard, {
-        id: crypto.randomUUID(),
-        name: columnName,
-        cards: [],
-      }),
-    );
-    setIsAddingColumn(false);
-    requestAnimationFrame(() => {
-      const columns = boardColumnsRef.current;
-      columns?.scrollTo({ left: -columns.scrollWidth, behavior: "smooth" });
-    });
   }
 
   return (
@@ -269,7 +284,7 @@ export default function Home() {
               <div className="board-toolbar-actions">
                 <p className="drag-hint">
                   <GripVertical size={15} />
-                  برای جابه‌جایی، کارت را بکشید
+                  برای جابه‌جایی، کارت یا ستون را بکشید
                 </p>
               </div>
             </div>
@@ -278,54 +293,66 @@ export default function Home() {
               id="kanban-board"
               sensors={sensors}
               collisionDetection={boardCollisionDetection}
-              onDragStart={(event) => setActiveCardId(String(event.active.id))}
-              onDragCancel={() => setActiveCardId(null)}
+              onDragStart={(event) => {
+                if (event.active.data.current?.type === "column") {
+                  setActiveColumnId(
+                    String(event.active.id).slice(
+                      sortableColumnPrefix.length,
+                    ),
+                  );
+                  setActiveCardId(null);
+                } else {
+                  setActiveCardId(String(event.active.id));
+                  setActiveColumnId(null);
+                }
+              }}
+              onDragCancel={() => {
+                setActiveCardId(null);
+                setActiveColumnId(null);
+              }}
               onDragEnd={handleDragEnd}
             >
-              <div
-                className="board-columns"
-                data-testid="board-columns"
-                ref={boardColumnsRef}
-                style={boardStyle}
+              <SortableContext
+                items={board.map(
+                  (column) => `${sortableColumnPrefix}${column.id}`,
+                )}
+                strategy={horizontalListSortingStrategy}
               >
-                {board.map((column) => (
-                  <KanbanColumn
-                    key={column.id}
-                    column={column}
-                    onAddCard={handleAddCard}
-                    onDeleteCard={(cardId) =>
-                      setBoard((currentBoard) =>
-                        deleteCard(currentBoard, cardId),
-                      )
-                    }
-                    onRename={(name) =>
-                      setBoard((currentBoard) =>
-                        renameColumn(currentBoard, column.id, name),
-                      )
-                    }
-                  />
-                ))}
-                <div className="add-column-slot">
-                  {isAddingColumn ? (
-                    <AddColumnForm
-                      onSubmit={handleAddColumn}
-                      onCancel={() => setIsAddingColumn(false)}
+                <div
+                  className="board-columns"
+                  data-testid="board-columns"
+                  style={boardStyle}
+                >
+                  {board.map((column) => (
+                    <KanbanColumn
+                      key={column.id}
+                      column={column}
+                      onAddCard={handleAddCard}
+                      onEditCard={(cardId, title, details) =>
+                        setBoard((currentBoard) =>
+                          editCard(currentBoard, cardId, title, details),
+                        )
+                      }
+                      onDeleteCard={(cardId) =>
+                        setBoard((currentBoard) =>
+                          deleteCard(currentBoard, cardId),
+                        )
+                      }
+                      onRename={(name) =>
+                        setBoard((currentBoard) =>
+                          renameColumn(currentBoard, column.id, name),
+                        )
+                      }
                     />
-                  ) : (
-                    <button
-                      className="add-column-button"
-                      type="button"
-                      aria-label="افزودن ستون دیگر"
-                      onClick={() => setIsAddingColumn(true)}
-                    >
-                      <Plus size={17} />
-                      افزودن ستون دیگر
-                    </button>
-                  )}
+                  ))}
                 </div>
-              </div>
+              </SortableContext>
               <DragOverlay>
-                {activeCard ? <CardPreview card={activeCard} /> : null}
+                {activeCard ? (
+                  <CardPreview card={activeCard} />
+                ) : activeColumn ? (
+                  <ColumnPreview column={activeColumn} />
+                ) : null}
               </DragOverlay>
             </DndContext>
             <footer className="board-footer">
@@ -339,50 +366,10 @@ export default function Home() {
   );
 }
 
-function AddColumnForm({
-  onSubmit,
-  onCancel,
-}: {
-  onSubmit: (name: string) => void;
-  onCancel: () => void;
-}) {
-  const [name, setName] = useState("");
-
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const trimmedName = name.trim();
-    if (trimmedName) onSubmit(trimmedName);
-  }
-
-  return (
-    <form className="add-column-form" onSubmit={handleSubmit}>
-      <input
-        className="column-name-input"
-        aria-label="نام ستون جدید"
-        placeholder="نام ستون"
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        autoFocus
-        required
-      />
-      <button className="add-column-submit" type="submit">
-        افزودن
-      </button>
-      <button
-        className="add-column-cancel"
-        type="button"
-        aria-label="انصراف از افزودن ستون"
-        onClick={onCancel}
-      >
-        انصراف
-      </button>
-    </form>
-  );
-}
-
 interface KanbanColumnProps {
   column: Column;
   onAddCard: (columnId: string, title: string, details: string) => void;
+  onEditCard: (cardId: string, title: string, details: string) => void;
   onDeleteCard: (cardId: string) => void;
   onRename: (name: string) => void;
 }
@@ -390,9 +377,21 @@ interface KanbanColumnProps {
 function KanbanColumn({
   column,
   onAddCard,
+  onEditCard,
   onDeleteCard,
   onRename,
 }: KanbanColumnProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setSortableNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: `${sortableColumnPrefix}${column.id}`,
+    data: { type: "column" },
+  });
   const { isOver, setNodeRef } = useDroppable({
     id: `${columnDropPrefix}${column.id}`,
   });
@@ -415,11 +414,26 @@ function KanbanColumn({
 
   return (
     <section
-      className={`kanban-column${isOver ? " is-over" : ""}`}
+      className={`kanban-column${isOver ? " is-over" : ""}${isDragging ? " is-column-dragging" : ""}`}
+      ref={setSortableNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
       data-testid={`kanban-column-${column.id}`}
       aria-labelledby={`column-heading-${column.id}`}
     >
       <header className="column-header">
+        <button
+          className="icon-button column-drag-handle"
+          type="button"
+          aria-label={`جابجایی ستون ${column.name}`}
+          data-testid="column-drag-handle"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical size={15} />
+        </button>
         <div className="column-name-wrap">
           <span className="column-color" />
           {isEditingName ? (
@@ -475,6 +489,9 @@ function KanbanColumn({
             <SortableCard
               key={card.id}
               card={card}
+              onEdit={(title, details) =>
+                onEditCard(card.id, title, details)
+              }
               onDelete={() => onDeleteCard(card.id)}
             />
           ))}
@@ -556,10 +573,12 @@ function AddCardForm({ onSubmit, onCancel }: AddCardFormProps) {
 
 interface SortableCardProps {
   card: Card;
+  onEdit: (title: string, details: string) => void;
   onDelete: () => void;
 }
 
-function SortableCard({ card, onDelete }: SortableCardProps) {
+function SortableCard({ card, onEdit, onDelete }: SortableCardProps) {
+  const [isEditing, setIsEditing] = useState(false);
   const {
     attributes,
     listeners,
@@ -579,30 +598,101 @@ function SortableCard({ card, onDelete }: SortableCardProps) {
       }}
       data-testid={`kanban-card-${card.id}`}
     >
-      <div className="card-actions">
-        <button
-          className="icon-button drag-handle"
-          type="button"
-          aria-label={`جابجایی کارت ${card.title}`}
-          data-testid="drag-handle"
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical size={16} />
+      {isEditing ? (
+        <EditCardForm
+          card={card}
+          onSubmit={(title, details) => {
+            onEdit(title, details);
+            setIsEditing(false);
+          }}
+          onCancel={() => setIsEditing(false)}
+        />
+      ) : (
+        <>
+          <div className="card-actions">
+            <button
+              className="icon-button drag-handle"
+              type="button"
+              aria-label={`جابجایی کارت ${card.title}`}
+              data-testid="drag-handle"
+              {...attributes}
+              {...listeners}
+            >
+              <GripVertical size={16} />
+            </button>
+            <span>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={`ویرایش کارت ${card.title}`}
+                title="ویرایش کارت"
+                onClick={() => setIsEditing(true)}
+              >
+                <Pencil size={14} />
+              </button>
+              <button
+                className="icon-button delete-button"
+                type="button"
+                aria-label={`حذف کارت ${card.title}`}
+                title="حذف کارت"
+                onClick={onDelete}
+              >
+                <Trash2 size={14} />
+              </button>
+            </span>
+          </div>
+          <h4 className="card-title">{card.title}</h4>
+          {card.details && <p className="card-details">{card.details}</p>}
+        </>
+      )}
+    </article>
+  );
+}
+
+function EditCardForm({
+  card,
+  onSubmit,
+  onCancel,
+}: {
+  card: Card;
+  onSubmit: (title: string, details: string) => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(card.title);
+  const [details, setDetails] = useState(card.details);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedTitle = title.trim();
+    if (trimmedTitle) onSubmit(trimmedTitle, details.trim());
+  }
+
+  return (
+    <form className="add-card-form" onSubmit={handleSubmit}>
+      <input
+        aria-label="عنوان کارت"
+        className="form-field"
+        value={title}
+        onChange={(event) => setTitle(event.target.value)}
+        required
+        autoFocus
+      />
+      <textarea
+        aria-label="جزئیات کارت"
+        className="form-field details-field"
+        value={details}
+        onChange={(event) => setDetails(event.target.value)}
+      />
+      <div className="form-actions">
+        <button className="submit-button" type="submit">
+          <Check size={14} />
+          ذخیره تغییرات
         </button>
-        <button
-          className="icon-button delete-button"
-          type="button"
-          aria-label={`حذف کارت ${card.title}`}
-          title="حذف کارت"
-          onClick={onDelete}
-        >
-          <Trash2 size={14} />
+        <button className="cancel-button" type="button" onClick={onCancel}>
+          انصراف
         </button>
       </div>
-      <h4 className="card-title">{card.title}</h4>
-      {card.details && <p className="card-details">{card.details}</p>}
-    </article>
+    </form>
   );
 }
 
@@ -612,5 +702,23 @@ function CardPreview({ card }: { card: Card }) {
       <h4 className="card-title">{card.title}</h4>
       {card.details && <p className="card-details">{card.details}</p>}
     </article>
+  );
+}
+
+function ColumnPreview({ column }: { column: Column }) {
+  return (
+    <section className="kanban-column drag-column-overlay" aria-hidden="true">
+      <header className="column-header">
+        <h3 className="column-name">{column.name}</h3>
+        <span className="column-count">{column.cards.length}</span>
+      </header>
+      <div className="card-list">
+        {column.cards.map((card) => (
+          <article className="task-card" key={card.id}>
+            <h4 className="card-title">{card.title}</h4>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }

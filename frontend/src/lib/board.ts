@@ -14,8 +14,8 @@ export type Board = Column[];
 
 export const initialBoard: Board = [
   {
-    id: "ideas",
-    name: "ایده‌ها",
+    id: "todo",
+    name: "برای انجام",
     cards: [
       {
         id: "brand-story",
@@ -26,22 +26,6 @@ export const initialBoard: Board = [
         id: "onboarding",
         title: "ایده‌های ورود کاربران",
         details: "تجربهٔ اولین برخورد را ساده‌تر و دلنشین‌تر کنیم.",
-      },
-    ],
-  },
-  {
-    id: "planned",
-    name: "برنامه‌ریزی",
-    cards: [
-      {
-        id: "mobile-research",
-        title: "بررسی تجربهٔ موبایل",
-        details: "بازخوردهای کاربران را در یک فهرست کوتاه جمع‌بندی کنیم.",
-      },
-      {
-        id: "design-system",
-        title: "مرتب‌سازی اجزای طراحی",
-        details: "رنگ‌ها و فاصله‌ها را برای نسخهٔ بعدی یکدست کنیم.",
       },
     ],
   },
@@ -62,17 +46,6 @@ export const initialBoard: Board = [
     ],
   },
   {
-    id: "review",
-    name: "بازبینی",
-    cards: [
-      {
-        id: "signup-flow",
-        title: "بازبینی مسیر ثبت‌نام",
-        details: "مراحل غیرضروری را پیدا و حذف کنیم.",
-      },
-    ],
-  },
-  {
     id: "done",
     name: "انجام‌شده",
     cards: [
@@ -88,6 +61,39 @@ export const initialBoard: Board = [
       },
     ],
   },
+  {
+    id: "awaiting-approval",
+    name: "در انتظار تأیید",
+    cards: [
+      {
+        id: "signup-flow",
+        title: "بازبینی مسیر ثبت‌نام",
+        details: "مراحل غیرضروری را پیدا و حذف کنیم.",
+      },
+    ],
+  },
+  {
+    id: "pending-projects",
+    name: "پروژه‌های در انتظار",
+    cards: [
+      {
+        id: "mobile-research",
+        title: "بررسی تجربهٔ موبایل",
+        details: "بازخوردهای کاربران را در یک فهرست کوتاه جمع‌بندی کنیم.",
+      },
+    ],
+  },
+  {
+    id: "completed-projects",
+    name: "پروژه‌های اتمام‌شده",
+    cards: [
+      {
+        id: "design-system",
+        title: "مرتب‌سازی اجزای طراحی",
+        details: "رنگ‌ها و فاصله‌ها را برای نسخهٔ بعدی یکدست کنیم.",
+      },
+    ],
+  },
 ];
 
 export function renameColumn(board: Board, columnId: string, name: string): Board {
@@ -99,11 +105,27 @@ export function renameColumn(board: Board, columnId: string, name: string): Boar
   );
 }
 
-export function addColumn(board: Board, column: Column): Board {
-  const name = column.name.trim();
-  if (!name) return board;
+export function moveColumn(
+  board: Board,
+  columnId: string,
+  targetColumnId: string,
+): Board {
+  const sourceIndex = board.findIndex((column) => column.id === columnId);
+  const targetIndex = board.findIndex(
+    (column) => column.id === targetColumnId,
+  );
+  if (
+    sourceIndex < 0 ||
+    targetIndex < 0 ||
+    sourceIndex === targetIndex
+  ) {
+    return board;
+  }
 
-  return [...board, { ...column, name }];
+  const nextBoard = [...board];
+  const [movedColumn] = nextBoard.splice(sourceIndex, 1);
+  nextBoard.splice(targetIndex, 0, movedColumn);
+  return nextBoard;
 }
 
 export function addCard(board: Board, columnId: string, card: Card): Board {
@@ -112,6 +134,30 @@ export function addCard(board: Board, columnId: string, card: Card): Board {
       ? { ...column, cards: [...column.cards, card] }
       : column,
   );
+}
+
+export function editCard(
+  board: Board,
+  cardId: string,
+  title: string,
+  details: string,
+): Board {
+  const trimmedTitle = title.trim();
+  if (
+    !trimmedTitle ||
+    !board.some((column) => column.cards.some((card) => card.id === cardId))
+  ) {
+    return board;
+  }
+
+  return board.map((column) => ({
+    ...column,
+    cards: column.cards.map((card) =>
+      card.id === cardId
+        ? { ...card, title: trimmedTitle, details: details.trim() }
+        : card,
+    ),
+  }));
 }
 
 export function deleteCard(board: Board, cardId: string): Board {
