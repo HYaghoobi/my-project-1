@@ -1,0 +1,195 @@
+{
+  "database": {
+    "engine": "SQLite",
+    "file": "data/pm.sqlite3",
+    "schema_version": 1,
+    "foreign_keys": true
+  },
+  "tables": [
+    {
+      "name": "users",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "autoincrement": true
+        },
+        {
+          "name": "username",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "password_hash",
+          "type": "TEXT",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "type": "unique",
+          "columns": ["username"]
+        }
+      ]
+    },
+    {
+      "name": "boards",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "autoincrement": true
+        },
+        {
+          "name": "user_id",
+          "type": "INTEGER",
+          "not_null": true
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "type": "unique",
+          "columns": ["user_id"]
+        },
+        {
+          "type": "foreign_key",
+          "columns": ["user_id"],
+          "references": {
+            "table": "users",
+            "columns": ["id"]
+          },
+          "on_delete": "CASCADE"
+        }
+      ]
+    },
+    {
+      "name": "columns",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "autoincrement": true
+        },
+        {
+          "name": "board_id",
+          "type": "INTEGER",
+          "not_null": true
+        },
+        {
+          "name": "name",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "position",
+          "type": "INTEGER",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "type": "foreign_key",
+          "columns": ["board_id"],
+          "references": {
+            "table": "boards",
+            "columns": ["id"]
+          },
+          "on_delete": "CASCADE"
+        },
+        {
+          "type": "unique",
+          "columns": ["board_id", "position"]
+        },
+        {
+          "type": "check",
+          "expression": "position >= 0"
+        }
+      ]
+    },
+    {
+      "name": "cards",
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "primary_key": true,
+          "autoincrement": true
+        },
+        {
+          "name": "column_id",
+          "type": "INTEGER",
+          "not_null": true
+        },
+        {
+          "name": "title",
+          "type": "TEXT",
+          "not_null": true
+        },
+        {
+          "name": "details",
+          "type": "TEXT",
+          "not_null": true,
+          "default": ""
+        },
+        {
+          "name": "position",
+          "type": "INTEGER",
+          "not_null": true
+        }
+      ],
+      "constraints": [
+        {
+          "type": "foreign_key",
+          "columns": ["column_id"],
+          "references": {
+            "table": "columns",
+            "columns": ["id"]
+          },
+          "on_delete": "CASCADE"
+        },
+        {
+          "type": "unique",
+          "columns": ["column_id", "position"]
+        },
+        {
+          "type": "check",
+          "expression": "position >= 0"
+        }
+      ]
+    }
+  ],
+  "initial_columns": [
+    {
+      "position": 0,
+      "name": "برای انجام"
+    },
+    {
+      "position": 1,
+      "name": "در حال انجام"
+    },
+    {
+      "position": 2,
+      "name": "انجام‌شده"
+    },
+    {
+      "position": 3,
+      "name": "در انتظار تأیید"
+    },
+    {
+      "position": 4,
+      "name": "پروژه‌های در انتظار"
+    },
+    {
+      "position": 5,
+      "name": "پروژه‌های اتمام‌شده"
+    }
+  ]
+}
