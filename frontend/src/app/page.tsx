@@ -30,6 +30,7 @@ import {
   Inbox,
   LayoutDashboard,
   Layers3,
+  LogOut,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -38,6 +39,7 @@ import {
 import Image from "next/image";
 import {
   useState,
+  useSyncExternalStore,
   type CSSProperties,
   type FormEvent,
   type KeyboardEvent,
@@ -58,6 +60,21 @@ import {
 
 const columnDropPrefix = "column-drop:";
 const sortableColumnPrefix = "sortable-column:";
+const authSessionKey = "pm-authenticated-user";
+const authChangeEvent = "pm-auth-change";
+
+function subscribeToAuthChanges(onChange: () => void) {
+  window.addEventListener(authChangeEvent, onChange);
+  return () => window.removeEventListener(authChangeEvent, onChange);
+}
+
+function getAuthSnapshot() {
+  return window.sessionStorage.getItem(authSessionKey) === "user";
+}
+
+function getServerAuthSnapshot(): null {
+  return null;
+}
 
 const boardCollisionDetection: CollisionDetection = (args) => {
   const isColumnDrag = args.active.data.current?.type === "column";
@@ -94,6 +111,11 @@ const boardCollisionDetection: CollisionDetection = (args) => {
 };
 
 export default function Home() {
+  const isAuthenticated = useSyncExternalStore(
+    subscribeToAuthChanges,
+    getAuthSnapshot,
+    getServerAuthSnapshot,
+  );
   const [board, setBoard] = useState<Board>(initialBoard);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [activeColumnId, setActiveColumnId] = useState<string | null>(null);
@@ -110,6 +132,31 @@ export default function Home() {
     .flatMap((column) => column.cards)
     .find((card) => card.id === activeCardId);
   const activeColumn = board.find((column) => column.id === activeColumnId);
+
+  function handleSignIn(username: string, password: string): boolean {
+    if (username !== "user" || password !== "password") return false;
+
+    window.sessionStorage.setItem(authSessionKey, username);
+    window.dispatchEvent(new Event(authChangeEvent));
+    return true;
+  }
+
+  function handleSignOut() {
+    window.sessionStorage.removeItem(authSessionKey);
+    window.dispatchEvent(new Event(authChangeEvent));
+  }
+
+  if (isAuthenticated === null) {
+    return (
+      <div className="auth-loading" role="status">
+        در حال بررسی نشست...
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <SignInScreen onSignIn={handleSignIn} />;
+  }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveCardId(null);
@@ -198,6 +245,15 @@ export default function Home() {
           <span className="workspace-avatar" aria-label="تیم محصول">
             ت
           </span>
+          <button
+            className="logout-button"
+            type="button"
+            aria-label="خروج"
+            onClick={handleSignOut}
+          >
+            <LogOut size={15} />
+            <span className="logout-label">خروج</span>
+          </button>
         </div>
       </header>
 
@@ -363,6 +419,73 @@ export default function Home() {
         </main>
       </div>
     </div>
+  );
+}
+
+function SignInScreen({
+  onSignIn,
+}: {
+  onSignIn: (username: string, password: string) => boolean;
+}) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [hasError, setHasError] = useState(false);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!onSignIn(username, password)) setHasError(true);
+  }
+
+  return (
+    <main className="signin-screen" dir="rtl">
+      <form className="signin-card" onSubmit={handleSubmit}>
+        <div className="signin-brand">
+          <Image
+            className="brand-logo"
+            src="/project-manager-logo.svg"
+            width={40}
+            height={40}
+            alt=""
+          />
+          <span className="brand-name">مدیر پروژه</span>
+        </div>
+        <h1 className="signin-title">ورود به حساب کاربری</h1>
+        <p className="signin-description">
+          برای مشاهدهٔ تختهٔ کانبان، وارد شوید.
+        </p>
+        <label className="signin-label" htmlFor="username">
+          نام کاربری
+        </label>
+        <input
+          id="username"
+          className="signin-input"
+          autoComplete="username"
+          value={username}
+          onChange={(event) => setUsername(event.target.value)}
+          required
+        />
+        <label className="signin-label" htmlFor="password">
+          رمز عبور
+        </label>
+        <input
+          id="password"
+          className="signin-input"
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          required
+        />
+        {hasError && (
+          <p className="signin-error" role="alert">
+            نام کاربری یا رمز عبور نادرست است.
+          </p>
+        )}
+        <button className="signin-submit" type="submit">
+          ورود
+        </button>
+      </form>
+    </main>
   );
 }
 

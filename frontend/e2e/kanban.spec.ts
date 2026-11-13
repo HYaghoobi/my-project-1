@@ -1,12 +1,68 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-test.beforeEach(async ({ page }) => {
+async function signIn(page: Page) {
   await page.goto("/");
+  await page.getByLabel("نام کاربری").fill("user");
+  await page.getByLabel("رمز عبور").fill("password");
+  await page.getByRole("button", { name: "ورود" }).click();
+  await expect(page.getByRole("heading", { name: "تختهٔ تیم محصول" })).toBeVisible();
+}
+
+test("rejects invalid credentials and accepts the demo account", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(
+    page.getByRole("heading", { name: "ورود به حساب کاربری" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("board-columns")).toHaveCount(0);
+
+  await page.getByLabel("نام کاربری").fill("invalid");
+  await page.getByLabel("رمز عبور").fill("credentials");
+  await page.getByRole("button", { name: "ورود" }).click();
+  await expect(page.locator(".signin-error")).toHaveText(
+    "نام کاربری یا رمز عبور نادرست است.",
+  );
+  await expect(page.getByTestId("board-columns")).toHaveCount(0);
+
+  await page.getByLabel("نام کاربری").fill("user");
+  await page.getByLabel("رمز عبور").fill("password");
+  await page.getByRole("button", { name: "ورود" }).click();
+  await expect(page.getByRole("heading", { name: "تختهٔ تیم محصول" })).toBeVisible();
+});
+
+test("preserves the tab session across reload and clears it on logout", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "تختهٔ تیم محصول" })).toBeVisible();
+
+  const browser = page.context().browser();
+  if (!browser) throw new Error("Unable to create a fresh browser session");
+  const freshContext = await browser.newContext();
+  try {
+    const freshPage = await freshContext.newPage();
+    await freshPage.goto("/");
+    await expect(
+      freshPage.getByRole("heading", { name: "ورود به حساب کاربری" }),
+    ).toBeVisible();
+    await expect(freshPage.getByTestId("board-columns")).toHaveCount(0);
+  } finally {
+    await freshContext.close();
+  }
+
+  await page.getByRole("button", { name: "خروج" }).click();
+  await expect(
+    page.getByRole("heading", { name: "ورود به حساب کاربری" }),
+  ).toBeVisible();
+  await expect(page.getByTestId("board-columns")).toHaveCount(0);
 });
 
 test("shows the sample board in Persian with six fixed columns", async ({
   page,
 }) => {
+  await signIn(page);
   await expect(page.locator("html")).toHaveAttribute("lang", "fa");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await expect(page).toHaveTitle("مدیر پروژه | تختهٔ کانبان");
@@ -34,6 +90,7 @@ test("shows the sample board in Persian with six fixed columns", async ({
 });
 
 test("adds and removes a card", async ({ page }) => {
+  await signIn(page);
   await page.getByRole("button", { name: "افزودن کارت به برای انجام" }).click();
   await page.getByLabel("عنوان کارت").fill("آزمون جریان جدید");
   await page.getByLabel("جزئیات کارت").fill("این کارت برای آزمودن رابط ساخته شده است.");
@@ -47,6 +104,7 @@ test("adds and removes a card", async ({ page }) => {
 });
 
 test("renames a column", async ({ page }) => {
+  await signIn(page);
   await page.getByRole("button", { name: "تغییر نام ستون برای انجام" }).click();
   const nameInput = page.getByRole("textbox", { name: "نام ستون" });
 
@@ -63,6 +121,7 @@ test("renames a column", async ({ page }) => {
 test("closes the column editor on Enter when the name is blank", async ({
   page,
 }) => {
+  await signIn(page);
   await page.getByRole("button", { name: "تغییر نام ستون برای انجام" }).click();
   const nameInput = page.getByRole("textbox", { name: "نام ستون" });
 
@@ -74,6 +133,7 @@ test("closes the column editor on Enter when the name is blank", async ({
 });
 
 test("edits a card title and details", async ({ page }) => {
+  await signIn(page);
   const card = page.getByTestId("kanban-card-brand-story");
   await card.getByRole("button", { name: "ویرایش کارت روایت تازه برای برند" }).click();
   await card.getByLabel("عنوان کارت").fill("روایت بازنگری‌شده");
@@ -85,6 +145,7 @@ test("edits a card title and details", async ({ page }) => {
 });
 
 test("moves a card to another column", async ({ page }) => {
+  await signIn(page);
   const card = page.getByTestId("kanban-card-product-copy");
   const handle = card.getByTestId("drag-handle");
   const destination = page
@@ -126,6 +187,7 @@ test("moves a card to another column", async ({ page }) => {
 });
 
 test("reorders cards within the same column", async ({ page }) => {
+  await signIn(page);
   const column = page.getByTestId("kanban-column-todo");
   const source = page
     .getByTestId("kanban-card-onboarding")
@@ -160,6 +222,7 @@ test("reorders cards within the same column", async ({ page }) => {
 });
 
 test("reorders columns without moving their cards", async ({ page }) => {
+  await signIn(page);
   const sourceColumn = page.getByTestId("kanban-column-in-progress");
   const targetColumn = page.getByTestId("kanban-column-todo");
   const sourceHandle = sourceColumn.getByTestId("column-drag-handle");
@@ -202,6 +265,7 @@ test("reorders columns without moving their cards", async ({ page }) => {
 test("keeps the columns horizontally scrollable on a small screen", async ({
   page,
 }) => {
+  await signIn(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
   const dimensions = await page.locator(".board-columns").evaluate((element) => ({

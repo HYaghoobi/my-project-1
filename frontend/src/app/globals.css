@@ -892,6 +892,119 @@ button:disabled {
   background: #ffe1a0;
 }
 
+.auth-loading,
+.signin-screen {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: #f5f7fb;
+}
+
+.auth-loading {
+  color: var(--muted);
+}
+
+.signin-card {
+  display: grid;
+  width: min(100%, 390px);
+  gap: 10px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-top: 4px solid var(--yellow);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(3 33 71 / 8%);
+}
+
+.signin-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+
+.signin-brand .brand-logo {
+  width: 40px;
+  height: 40px;
+}
+
+.signin-title {
+  margin: 0;
+  color: var(--navy);
+  font-size: 19px;
+}
+
+.signin-description {
+  margin: 0 0 9px;
+  color: var(--muted);
+  line-height: 1.8;
+}
+
+.signin-label {
+  color: #48566a;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.signin-input {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid #dfe5ec;
+  border-radius: 7px;
+  color: var(--ink);
+  background: #fcfcfd;
+}
+
+.signin-input:focus {
+  border-color: rgb(32 157 215 / 65%);
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(32 157 215 / 10%);
+}
+
+.signin-error {
+  margin: 0;
+  color: #b42332;
+  font-size: 12px;
+}
+
+.signin-submit {
+  min-height: 40px;
+  margin-top: 5px;
+  border: 0;
+  border-radius: 7px;
+  color: #fff;
+  background: var(--purple);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.signin-submit:hover {
+  background: #633078;
+}
+
+.logout-button {
+  display: inline-flex;
+  min-height: 29px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid #e4e8ee;
+  border-radius: 6px;
+  color: #536278;
+  background: #fff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.logout-button:hover {
+  border-color: #d7bfc3;
+  color: #a53d4a;
+  background: #fff8f8;
+}
+
 @media (min-width: 1500px) {
   .workspace-shell {
     grid-template-columns: 248px minmax(0, 1fr);
@@ -947,6 +1060,15 @@ button:disabled {
 
   .topbar-actions {
     gap: 5px;
+  }
+
+  .logout-label {
+    display: none;
+  }
+
+  .logout-button {
+    width: 26px;
+    padding: 4px;
   }
 
   .topbar-icon {
