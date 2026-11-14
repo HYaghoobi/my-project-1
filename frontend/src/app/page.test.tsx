@@ -18,6 +18,7 @@ import {
   type Board,
 } from "@/lib/board";
 import {
+  ApiError,
   createCard,
   deleteCard,
   getBoard,
@@ -29,6 +30,11 @@ import Home from "./page";
 vi.mock("next/link", () => ({ default: "a" }));
 vi.mock("next/image", () => ({ default: () => null }));
 vi.mock("@/lib/api", () => ({
+  ApiError: class ApiError extends Error {
+    constructor(readonly status: number) {
+      super(`Request failed (${status}).`);
+    }
+  },
   createCard: vi.fn(),
   deleteCard: vi.fn(),
   getBoard: vi.fn(),
@@ -37,6 +43,8 @@ vi.mock("@/lib/api", () => ({
 }));
 
 const authSessionKey = "pm-authenticated-user";
+const localePreferenceKey = "pm-locale";
+const themePreferenceKey = "pm-theme";
 let apiBoard: Board;
 let nextCardId: number;
 
@@ -54,6 +62,10 @@ function copyBoard(board: Board): Board {
 
 beforeEach(() => {
   window.sessionStorage.clear();
+  window.localStorage.clear();
+  document.documentElement.lang = "fa";
+  document.documentElement.dir = "rtl";
+  delete document.documentElement.dataset.theme;
   apiBoard = copyBoard(initialBoard);
   nextCardId = 0;
   vi.mocked(getBoard).mockImplementation(async () => copyBoard(apiBoard));
@@ -111,9 +123,51 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   window.sessionStorage.clear();
+  window.localStorage.clear();
+  document.documentElement.lang = "fa";
+  document.documentElement.dir = "rtl";
+  delete document.documentElement.dataset.theme;
 });
 
 describe("Kanban page integration", () => {
+  it("switches and persists the interface language, direction, and theme", async () => {
+    const { unmount } = render(<Home />);
+    expect(
+      await screen.findByRole("heading", { name: "ورود به حساب کاربری" }),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByTestId("locale-toggle"));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeVisible();
+    expect(document.documentElement).toHaveAttribute("lang", "en");
+    expect(document.documentElement).toHaveAttribute("dir", "ltr");
+    expect(window.localStorage.getItem(localePreferenceKey)).toBe("en");
+
+    fireEvent.click(screen.getByTestId("theme-toggle"));
+    expect(screen.getByTestId("theme-toggle")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(window.localStorage.getItem(themePreferenceKey)).toBe("dark");
+
+    unmount();
+    render(<Home />);
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeVisible();
+    expect(document.documentElement).toHaveAttribute("lang", "en");
+    expect(document.documentElement).toHaveAttribute("dir", "ltr");
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+  });
+
+  it("localizes HTTP errors in the selected interface language", async () => {
+    window.localStorage.setItem(localePreferenceKey, "en");
+    vi.mocked(getBoard).mockRejectedValue(new ApiError(503));
+    renderAuthenticatedHome();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Request to the server failed (503).",
+    );
+  });
+
   it("requires the demo credentials before showing the board", async () => {
     render(<Home />);
 

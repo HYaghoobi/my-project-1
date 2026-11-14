@@ -133,6 +133,34 @@ test("shows the sample board in Persian with six fixed columns", async ({
   await expect(page.getByTestId("card-count")).toHaveText("9");
 });
 
+test("switches locale and theme and restores both preferences after reload", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByTestId("locale-toggle").click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+  await expect(
+    page.getByRole("heading", { name: "Sign in" }),
+  ).toBeVisible();
+
+  await page.getByTestId("theme-toggle").click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await expect(page.locator("html")).toHaveAttribute("dir", "ltr");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await expect(
+    page.getByRole("heading", { name: "Sign in" }),
+  ).toBeVisible();
+
+  await page.getByLabel("Username").fill("user");
+  await page.getByLabel("Password").fill("password");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page.getByRole("heading", { name: "Product Team Board" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "To do" })).toBeVisible();
+});
+
 test("adds and removes a card", async ({ page }) => {
   await signIn(page);
   await page.getByRole("button", { name: "افزودن کارت به برای انجام" }).click();

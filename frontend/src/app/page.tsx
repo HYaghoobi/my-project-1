@@ -28,12 +28,15 @@ import {
   Check,
   GripVertical,
   Inbox,
+  Languages,
   LayoutDashboard,
   Layers3,
   LogOut,
+  Moon,
   MoreHorizontal,
   Pencil,
   Plus,
+  Sun,
   Trash2,
 } from "lucide-react";
 import Image from "next/image";
@@ -54,17 +57,28 @@ import {
   type Column,
 } from "@/lib/board";
 import {
+  ApiError,
   createCard,
   deleteCard,
   getBoard,
   updateCard,
   updateColumn,
 } from "@/lib/api";
+import {
+  localizedColumnName,
+  translate,
+  type Locale,
+  type Theme,
+  type TranslationKey,
+} from "@/lib/i18n";
 
 const columnDropPrefix = "column-drop:";
 const sortableColumnPrefix = "sortable-column:";
 const authSessionKey = "pm-authenticated-user";
 const authChangeEvent = "pm-auth-change";
+const localePreferenceKey = "pm-locale";
+const themePreferenceKey = "pm-theme";
+const preferenceChangeEvent = "pm-preference-change";
 
 function subscribeToAuthChanges(onChange: () => void) {
   window.addEventListener(authChangeEvent, onChange);
@@ -77,6 +91,56 @@ function getAuthSnapshot() {
 
 function getServerAuthSnapshot(): null {
   return null;
+}
+
+function subscribeToPreferences(onChange: () => void) {
+  window.addEventListener(preferenceChangeEvent, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(preferenceChangeEvent, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+function getLocalePreference(): Locale {
+  return window.localStorage.getItem(localePreferenceKey) === "en" ? "en" : "fa";
+}
+
+function getServerLocalePreference(): Locale {
+  return "fa";
+}
+
+function getThemePreference(): Theme {
+  return window.localStorage.getItem(themePreferenceKey) === "dark"
+    ? "dark"
+    : "light";
+}
+
+function getServerThemePreference(): Theme {
+  return "light";
+}
+
+function setLocalePreference(locale: Locale) {
+  window.localStorage.setItem(localePreferenceKey, locale);
+  window.dispatchEvent(new Event(preferenceChangeEvent));
+}
+
+function setThemePreference(theme: Theme) {
+  window.localStorage.setItem(themePreferenceKey, theme);
+  window.dispatchEvent(new Event(preferenceChangeEvent));
+}
+
+function getErrorMessage(
+  error: unknown,
+  locale: Locale,
+  fallbackKey: TranslationKey,
+): string {
+  if (error instanceof ApiError) {
+    return `${translate(locale, "serverRequestFailed")} (${error.status}).`;
+  }
+  return error instanceof Error
+    ? error.message
+    : translate(locale, fallbackKey);
 }
 
 const boardCollisionDetection: CollisionDetection = (args) => {
@@ -114,6 +178,16 @@ const boardCollisionDetection: CollisionDetection = (args) => {
 };
 
 export default function Home() {
+  const locale = useSyncExternalStore(
+    subscribeToPreferences,
+    getLocalePreference,
+    getServerLocalePreference,
+  );
+  const theme = useSyncExternalStore(
+    subscribeToPreferences,
+    getThemePreference,
+    getServerThemePreference,
+  );
   const isAuthenticated = useSyncExternalStore(
     subscribeToAuthChanges,
     getAuthSnapshot,
@@ -124,6 +198,8 @@ export default function Home() {
   const [boardError, setBoardError] = useState<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [activeColumnId, setActiveColumnId] = useState<string | null>(null);
+  const direction = locale === "fa" ? "rtl" : "ltr";
+  const t = (key: TranslationKey) => translate(locale, key);
   const boardStyle: CSSProperties & { "--column-count": number } = {
     "--column-count": board.length,
   };
@@ -139,6 +215,13 @@ export default function Home() {
   const activeColumn = board.find((column) => column.id === activeColumnId);
 
   useEffect(() => {
+    document.documentElement.lang = locale;
+    document.documentElement.dir = direction;
+    document.documentElement.dataset.theme = theme;
+    document.title = translate(locale, "documentTitle");
+  }, [direction, locale, theme]);
+
+  useEffect(() => {
     if (!isAuthenticated) return;
 
     let isCurrentRequest = true;
@@ -151,11 +234,7 @@ export default function Home() {
       })
       .catch((error: unknown) => {
         if (isCurrentRequest) {
-          setBoardError(
-            error instanceof Error
-              ? error.message
-              : "بارگذاری برد از سرور ناموفق بود.",
-          );
+          setBoardError(getErrorMessage(error, locale, "boardLoadError"));
         }
       })
       .finally(() => {
@@ -165,7 +244,7 @@ export default function Home() {
     return () => {
       isCurrentRequest = false;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, locale]);
 
   async function saveBoardChange(change: () => Promise<void>) {
     setBoardError(null);
@@ -173,16 +252,16 @@ export default function Home() {
       await change();
       setBoard(await getBoard());
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "ذخیرهٔ تغییر برد ناموفق بود.";
+      const message = getErrorMessage(error, locale, "boardSaveError");
       setBoardError(message);
       try {
         setBoard(await getBoard());
       } catch (refreshError) {
-        const refreshMessage =
-          refreshError instanceof Error
-            ? refreshError.message
-            : "بارگذاری دوبارهٔ برد ناموفق بود.";
+        const refreshMessage = getErrorMessage(
+          refreshError,
+          locale,
+          "boardRefreshError",
+        );
         setBoardError(`${message} ${refreshMessage}`);
       }
     }
@@ -194,11 +273,7 @@ export default function Home() {
     try {
       setBoard(await getBoard());
     } catch (error) {
-      setBoardError(
-        error instanceof Error
-          ? error.message
-          : "بارگذاری برد از سرور ناموفق بود.",
-      );
+      setBoardError(getErrorMessage(error, locale, "boardLoadError"));
     } finally {
       setIsLoadingBoard(false);
     }
@@ -223,19 +298,27 @@ export default function Home() {
   if (isAuthenticated === null) {
     return (
       <div className="auth-loading" role="status">
-        در حال بررسی نشست...
+        {t("checkingSession")}
       </div>
     );
   }
 
   if (!isAuthenticated) {
-    return <SignInScreen onSignIn={handleSignIn} />;
+    return (
+      <SignInScreen
+        locale={locale}
+        theme={theme}
+        onLocaleChange={setLocalePreference}
+        onThemeChange={setThemePreference}
+        onSignIn={handleSignIn}
+      />
+    );
   }
 
   if (isLoadingBoard) {
     return (
       <div className="auth-loading" role="status">
-        در حال بارگذاری برد...
+        {t("loadingBoard")}
       </div>
     );
   }
@@ -245,7 +328,7 @@ export default function Home() {
       <main className="auth-loading board-load-error">
         <p role="alert">{boardError}</p>
         <button className="signin-submit" type="button" onClick={retryBoardLoad}>
-          تلاش دوباره
+          {t("retry")}
         </button>
       </main>
     );
@@ -311,13 +394,13 @@ export default function Home() {
   }
 
   return (
-    <div className="app-shell" dir="ltr">
+    <div className="app-shell" dir={direction}>
       <header className="topbar">
         <Link
           className="brand"
           href="/"
-          aria-label="مدیر پروژه، صفحهٔ اصلی"
-          dir="rtl"
+          aria-label={t("homeLink")}
+          dir={direction}
         >
           <span className="brand-mark" aria-hidden="true">
             <Image
@@ -329,31 +412,37 @@ export default function Home() {
               priority
             />
           </span>
-          <span className="brand-name">مدیر پروژه</span>
+          <span className="brand-name">{t("appName")}</span>
         </Link>
-        <div className="topbar-context" dir="rtl">
-          <span>فضای کاری</span>
+        <div className="topbar-context" dir={direction}>
+          <span>{t("workspace")}</span>
           <span className="context-divider">/</span>
-          <strong>استودیو محصول</strong>
+          <strong>{t("studio")}</strong>
         </div>
         <div className="topbar-actions">
-          <span className="topbar-icon" aria-label="راهنما">
+          <AppearanceControls
+            locale={locale}
+            theme={theme}
+            onLocaleChange={setLocalePreference}
+            onThemeChange={setThemePreference}
+          />
+          <span className="topbar-icon" aria-label={t("help")}>
             <CircleHelp size={17} />
           </span>
-          <span className="topbar-icon" aria-label="اعلان‌ها">
+          <span className="topbar-icon" aria-label={t("notifications")}>
             <Bell size={17} />
           </span>
-          <span className="workspace-avatar" aria-label="تیم محصول">
-            ت
+          <span className="workspace-avatar" aria-label={t("team")}>
+            {locale === "fa" ? "ت" : "P"}
           </span>
           <button
             className="logout-button"
             type="button"
-            aria-label="خروج"
+            aria-label={t("logout")}
             onClick={handleSignOut}
           >
             <LogOut size={15} />
-            <span className="logout-label">خروج</span>
+            <span className="logout-label">{t("logout")}</span>
           </button>
         </div>
       </header>
@@ -364,25 +453,25 @@ export default function Home() {
         </p>
       )}
 
-      <div className="workspace-shell">
-        <aside className="sidebar" dir="rtl">
+      <div className="workspace-shell" dir={direction}>
+        <aside className="sidebar" dir={direction}>
           <div className="sidebar-workspace">
             <span className="sidebar-workspace-icon">
               <Layers3 size={17} />
             </span>
             <div className="sidebar-workspace-copy">
-              <span className="sidebar-eyebrow">فضای کاری</span>
-              <strong>استودیو محصول</strong>
+              <span className="sidebar-eyebrow">{t("workspace")}</span>
+              <strong>{t("studio")}</strong>
             </div>
             <MoreHorizontal className="sidebar-more" size={18} />
           </div>
 
-          <div className="sidebar-section-label">فضای کاری شما</div>
+          <div className="sidebar-section-label">{t("workspaceForYou")}</div>
           <Link className="sidebar-board-link" href="#board">
             <span className="sidebar-link-icon">
               <Inbox size={17} />
             </span>
-            <span>تختهٔ تیم محصول</span>
+            <span>{t("sidebarBoard")}</span>
             <span className="sidebar-link-count">{countCards(board)}</span>
           </Link>
 
@@ -390,41 +479,41 @@ export default function Home() {
             <div className="sidebar-note-mark">
               <LayoutDashboard size={16} />
             </div>
-            <strong>قدم بعدی، همین‌جاست</strong>
-            <p>کارت‌ها را بین ستون‌ها جابه‌جا کنید و پیشرفت تیم را ببینید.</p>
+            <strong>{t("sidebarNoteTitle")}</strong>
+            <p>{t("sidebarNoteBody")}</p>
           </div>
 
           <div className="sidebar-bottom">
             <span className="sidebar-bottom-dot" />
-            <span>یک تخته، مسیر پیشرفت</span>
+            <span>{t("sidebarFooter")}</span>
           </div>
         </aside>
 
-        <main className="workspace-main" dir="rtl" id="board">
+        <main className="workspace-main" dir={direction} id="board">
           <div className="board-header">
             <div className="board-heading">
               <div className="board-breadcrumb">
-                استودیو محصول <span>/</span> تخته‌ها
+                {t("studio")} <span>/</span> {t("boards")}
               </div>
               <h1 className="heading-title" id="page-title">
-                تختهٔ تیم محصول
+                {t("boardName")}
               </h1>
             </div>
             <div className="board-header-meta">
-              <div className="member-stack" aria-label="اعضای تیم">
-                <span className="member-avatar member-avatar-one">ن</span>
-                <span className="member-avatar member-avatar-two">م</span>
-                <span className="member-avatar member-avatar-three">آ</span>
+              <div className="member-stack" aria-label={t("members")}>
+                <span className="member-avatar member-avatar-one">{locale === "fa" ? "ن" : "N"}</span>
+                <span className="member-avatar member-avatar-two">{locale === "fa" ? "م" : "M"}</span>
+                <span className="member-avatar member-avatar-three">{locale === "fa" ? "آ" : "A"}</span>
               </div>
               <span className="board-meta-divider" />
               <div className="board-stat">
-                <span>کارت‌ها</span>
+                <span>{t("cards")}</span>
                 <strong data-testid="card-count">{countCards(board)}</strong>
               </div>
               <span className="board-meta-divider" />
               <div className="board-stat">
-                <span>ستون‌ها</span>
-                <strong>{board.length.toLocaleString("fa-IR")}</strong>
+                <span>{t("columns")}</span>
+                <strong>{board.length.toLocaleString(locale === "fa" ? "fa-IR" : "en-US")}</strong>
               </div>
             </div>
           </div>
@@ -437,17 +526,17 @@ export default function Home() {
                 </span>
                 <span>
                   <h2 className="board-title" id="board-title">
-                    نمای کلی کارها
+                    {t("boardOverview")}
                   </h2>
                   <p className="board-subtitle">
-                    {board.length.toLocaleString("fa-IR")} مرحله از ایده تا اجرا
+                    {board.length.toLocaleString(locale === "fa" ? "fa-IR" : "en-US")} {t("stepsFromIdea")}
                   </p>
                 </span>
               </div>
               <div className="board-toolbar-actions">
                 <p className="drag-hint">
                   <GripVertical size={15} />
-                  برای جابه‌جایی، کارت یا ستون را بکشید
+                  {t("dragHint")}
                 </p>
               </div>
             </div>
@@ -490,6 +579,8 @@ export default function Home() {
                     <KanbanColumn
                       key={column.id}
                       column={column}
+                      locale={locale}
+                      t={t}
                       onAddCard={handleAddCard}
                       onEditCard={(cardId, title, details) =>
                         void saveBoardChange(() =>
@@ -512,13 +603,13 @@ export default function Home() {
                 {activeCard ? (
                   <CardPreview card={activeCard} />
                 ) : activeColumn ? (
-                  <ColumnPreview column={activeColumn} />
+                  <ColumnPreview column={activeColumn} locale={locale} />
                 ) : null}
               </DragOverlay>
             </DndContext>
             <footer className="board-footer">
               <span className="board-footer-dot" />
-              همه‌چیز با یک قدم کوچک شروع می‌شود.
+              {t("boardFooter")}
             </footer>
           </section>
         </main>
@@ -527,14 +618,69 @@ export default function Home() {
   );
 }
 
+function AppearanceControls({
+  locale,
+  theme,
+  onLocaleChange,
+  onThemeChange,
+}: {
+  locale: Locale;
+  theme: Theme;
+  onLocaleChange: (locale: Locale) => void;
+  onThemeChange: (theme: Theme) => void;
+}) {
+  const t = (key: TranslationKey) => translate(locale, key);
+
+  return (
+    <div
+      className="appearance-controls"
+      dir={locale === "fa" ? "rtl" : "ltr"}
+    >
+      <button
+        className="appearance-button language-button"
+        type="button"
+        aria-label={locale === "fa" ? t("switchToEnglish") : t("switchToPersian")}
+        title={locale === "fa" ? t("switchToEnglish") : t("switchToPersian")}
+        data-testid="locale-toggle"
+        onClick={() => onLocaleChange(locale === "fa" ? "en" : "fa")}
+      >
+        <Languages size={15} />
+        <span>{locale === "fa" ? "EN" : "فا"}</span>
+      </button>
+      <button
+        className="appearance-button theme-button"
+        type="button"
+        aria-label={theme === "light" ? t("switchToDark") : t("switchToLight")}
+        title={theme === "light" ? t("switchToDark") : t("switchToLight")}
+        aria-pressed={theme === "dark"}
+        data-testid="theme-toggle"
+        onClick={() => onThemeChange(theme === "light" ? "dark" : "light")}
+      >
+        {theme === "light" ? <Moon size={15} /> : <Sun size={15} />}
+        <span>{theme === "light" ? t("darkMode") : t("lightMode")}</span>
+      </button>
+    </div>
+  );
+}
+
 function SignInScreen({
+  locale,
+  theme,
+  onLocaleChange,
+  onThemeChange,
   onSignIn,
 }: {
+  locale: Locale;
+  theme: Theme;
+  onLocaleChange: (locale: Locale) => void;
+  onThemeChange: (theme: Theme) => void;
   onSignIn: (username: string, password: string) => boolean;
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [hasError, setHasError] = useState(false);
+  const t = (key: TranslationKey) => translate(locale, key);
+  const direction = locale === "fa" ? "rtl" : "ltr";
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -542,7 +688,15 @@ function SignInScreen({
   }
 
   return (
-    <main className="signin-screen" dir="rtl">
+    <main className="signin-screen" dir={direction}>
+      <div className="signin-preferences">
+        <AppearanceControls
+          locale={locale}
+          theme={theme}
+          onLocaleChange={onLocaleChange}
+          onThemeChange={onThemeChange}
+        />
+      </div>
       <form className="signin-card" onSubmit={handleSubmit}>
         <div className="signin-brand">
           <Image
@@ -552,14 +706,12 @@ function SignInScreen({
             height={40}
             alt=""
           />
-          <span className="brand-name">مدیر پروژه</span>
+          <span className="brand-name">{t("appName")}</span>
         </div>
-        <h1 className="signin-title">ورود به حساب کاربری</h1>
-        <p className="signin-description">
-          برای مشاهدهٔ تختهٔ کانبان، وارد شوید.
-        </p>
+        <h1 className="signin-title">{t("loginTitle")}</h1>
+        <p className="signin-description">{t("loginDescription")}</p>
         <label className="signin-label" htmlFor="username">
-          نام کاربری
+          {t("username")}
         </label>
         <input
           id="username"
@@ -570,7 +722,7 @@ function SignInScreen({
           required
         />
         <label className="signin-label" htmlFor="password">
-          رمز عبور
+          {t("password")}
         </label>
         <input
           id="password"
@@ -583,11 +735,11 @@ function SignInScreen({
         />
         {hasError && (
           <p className="signin-error" role="alert">
-            نام کاربری یا رمز عبور نادرست است.
+            {t("invalidCredentials")}
           </p>
         )}
         <button className="signin-submit" type="submit">
-          ورود
+          {t("login")}
         </button>
       </form>
     </main>
@@ -596,6 +748,8 @@ function SignInScreen({
 
 interface KanbanColumnProps {
   column: Column;
+  locale: Locale;
+  t: (key: TranslationKey) => string;
   onAddCard: (columnId: string, title: string, details: string) => void;
   onEditCard: (cardId: string, title: string, details: string) => void;
   onDeleteCard: (cardId: string) => void;
@@ -604,11 +758,14 @@ interface KanbanColumnProps {
 
 function KanbanColumn({
   column,
+  locale,
+  t,
   onAddCard,
   onEditCard,
   onDeleteCard,
   onRename,
 }: KanbanColumnProps) {
+  const displayName = localizedColumnName(column.name, locale);
   const {
     attributes,
     listeners,
@@ -656,7 +813,7 @@ function KanbanColumn({
         <button
           className="icon-button column-drag-handle"
           type="button"
-          aria-label={`جابجایی ستون ${column.name}`}
+          aria-label={`${t("moveColumn")} ${displayName}`}
           data-testid="column-drag-handle"
           {...attributes}
           {...listeners}
@@ -673,7 +830,7 @@ function KanbanColumn({
               }}
             >
               <input
-                aria-label="نام ستون"
+                aria-label={t("columnName")}
                 className="column-name-input"
                 value={nameDraft}
                 onChange={(event) => setNameDraft(event.target.value)}
@@ -683,20 +840,23 @@ function KanbanColumn({
             </form>
           ) : (
             <h3 className="column-name" id={`column-heading-${column.id}`}>
-              {column.name}
+              {displayName}
             </h3>
           )}
         </div>
-        <span className="column-count" aria-label={`${column.cards.length} کارت`}>
+        <span
+          className="column-count"
+          aria-label={`${column.cards.length} ${t("cardCount")}`}
+        >
           {column.cards.length}
         </span>
         <button
           className="icon-button"
           type="button"
-          aria-label={`تغییر نام ستون ${column.name}`}
-          title="تغییر نام ستون"
+          aria-label={`${t("renameColumn")} ${displayName}`}
+          title={t("renameColumn")}
           onClick={() => {
-            setNameDraft(column.name);
+            setNameDraft(displayName);
             setIsEditingName(true);
           }}
         >
@@ -718,6 +878,7 @@ function KanbanColumn({
             <SortableCard
               key={card.id}
               card={card}
+              t={t}
               onEdit={(title, details) =>
                 onEditCard(card.id, title, details)
               }
@@ -725,13 +886,14 @@ function KanbanColumn({
             />
           ))}
           {column.cards.length === 0 && (
-            <p className="empty-column">هنوز کارتی در این ستون نیست.</p>
+            <p className="empty-column">{t("emptyColumn")}</p>
           )}
         </div>
       </SortableContext>
 
       {isAddingCard ? (
         <AddCardForm
+          t={t}
           onSubmit={(title, details) => {
             onAddCard(column.id, title, details);
             setIsAddingCard(false);
@@ -742,11 +904,11 @@ function KanbanColumn({
         <button
           className="add-card-button"
           type="button"
-          aria-label={`افزودن کارت به ${column.name}`}
+          aria-label={`${t("addCardTo")} ${displayName}`}
           onClick={() => setIsAddingCard(true)}
         >
           <Plus size={15} />
-          افزودن کارت
+          {t("addCard")}
         </button>
       )}
     </section>
@@ -754,11 +916,12 @@ function KanbanColumn({
 }
 
 interface AddCardFormProps {
+  t: (key: TranslationKey) => string;
   onSubmit: (title: string, details: string) => void;
   onCancel: () => void;
 }
 
-function AddCardForm({ onSubmit, onCancel }: AddCardFormProps) {
+function AddCardForm({ t, onSubmit, onCancel }: AddCardFormProps) {
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
 
@@ -772,28 +935,28 @@ function AddCardForm({ onSubmit, onCancel }: AddCardFormProps) {
   return (
     <form className="add-card-form" onSubmit={handleSubmit}>
       <input
-        aria-label="عنوان کارت"
+        aria-label={t("cardTitle")}
         className="form-field"
-        placeholder="عنوان کارت"
+        placeholder={t("cardTitle")}
         value={title}
         onChange={(event) => setTitle(event.target.value)}
         required
         autoFocus
       />
       <textarea
-        aria-label="جزئیات کارت"
+        aria-label={t("cardDetails")}
         className="form-field details-field"
-        placeholder="جزئیات"
+        placeholder={t("details")}
         value={details}
         onChange={(event) => setDetails(event.target.value)}
       />
       <div className="form-actions">
         <button className="submit-button" type="submit">
           <Check size={14} />
-          ثبت کارت
+          {t("submitCard")}
         </button>
         <button className="cancel-button" type="button" onClick={onCancel}>
-          انصراف
+          {t("cancel")}
         </button>
       </div>
     </form>
@@ -802,11 +965,12 @@ function AddCardForm({ onSubmit, onCancel }: AddCardFormProps) {
 
 interface SortableCardProps {
   card: Card;
+  t: (key: TranslationKey) => string;
   onEdit: (title: string, details: string) => void;
   onDelete: () => void;
 }
 
-function SortableCard({ card, onEdit, onDelete }: SortableCardProps) {
+function SortableCard({ card, t, onEdit, onDelete }: SortableCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const {
     attributes,
@@ -815,7 +979,13 @@ function SortableCard({ card, onEdit, onDelete }: SortableCardProps) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: card.id });
+  } = useSortable({
+    id: card.id,
+    transition: {
+      duration: 280,
+      easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+    },
+  });
 
   return (
     <article
@@ -830,6 +1000,7 @@ function SortableCard({ card, onEdit, onDelete }: SortableCardProps) {
       {isEditing ? (
         <EditCardForm
           card={card}
+          t={t}
           onSubmit={(title, details) => {
             onEdit(title, details);
             setIsEditing(false);
@@ -842,7 +1013,7 @@ function SortableCard({ card, onEdit, onDelete }: SortableCardProps) {
             <button
               className="icon-button drag-handle"
               type="button"
-              aria-label={`جابجایی کارت ${card.title}`}
+              aria-label={`${t("moveCard")} ${card.title}`}
               data-testid="drag-handle"
               {...attributes}
               {...listeners}
@@ -853,8 +1024,8 @@ function SortableCard({ card, onEdit, onDelete }: SortableCardProps) {
               <button
                 className="icon-button"
                 type="button"
-                aria-label={`ویرایش کارت ${card.title}`}
-                title="ویرایش کارت"
+                aria-label={`${t("editCard")} ${card.title}`}
+                title={t("editCard")}
                 onClick={() => setIsEditing(true)}
               >
                 <Pencil size={14} />
@@ -862,8 +1033,8 @@ function SortableCard({ card, onEdit, onDelete }: SortableCardProps) {
               <button
                 className="icon-button delete-button"
                 type="button"
-                aria-label={`حذف کارت ${card.title}`}
-                title="حذف کارت"
+                aria-label={`${t("deleteCard")} ${card.title}`}
+                title={t("deleteCard")}
                 onClick={onDelete}
               >
                 <Trash2 size={14} />
@@ -880,10 +1051,12 @@ function SortableCard({ card, onEdit, onDelete }: SortableCardProps) {
 
 function EditCardForm({
   card,
+  t,
   onSubmit,
   onCancel,
 }: {
   card: Card;
+  t: (key: TranslationKey) => string;
   onSubmit: (title: string, details: string) => void;
   onCancel: () => void;
 }) {
@@ -899,7 +1072,7 @@ function EditCardForm({
   return (
     <form className="add-card-form" onSubmit={handleSubmit}>
       <input
-        aria-label="عنوان کارت"
+        aria-label={t("cardTitle")}
         className="form-field"
         value={title}
         onChange={(event) => setTitle(event.target.value)}
@@ -907,7 +1080,7 @@ function EditCardForm({
         autoFocus
       />
       <textarea
-        aria-label="جزئیات کارت"
+        aria-label={t("cardDetails")}
         className="form-field details-field"
         value={details}
         onChange={(event) => setDetails(event.target.value)}
@@ -915,10 +1088,10 @@ function EditCardForm({
       <div className="form-actions">
         <button className="submit-button" type="submit">
           <Check size={14} />
-          ذخیره تغییرات
+          {t("saveChanges")}
         </button>
         <button className="cancel-button" type="button" onClick={onCancel}>
-          انصراف
+          {t("cancel")}
         </button>
       </div>
     </form>
@@ -934,11 +1107,19 @@ function CardPreview({ card }: { card: Card }) {
   );
 }
 
-function ColumnPreview({ column }: { column: Column }) {
+function ColumnPreview({
+  column,
+  locale,
+}: {
+  column: Column;
+  locale: Locale;
+}) {
   return (
     <section className="kanban-column drag-column-overlay" aria-hidden="true">
       <header className="column-header">
-        <h3 className="column-name">{column.name}</h3>
+        <h3 className="column-name">
+          {localizedColumnName(column.name, locale)}
+        </h3>
         <span className="column-count">{column.cards.length}</span>
       </header>
       <div className="card-list">

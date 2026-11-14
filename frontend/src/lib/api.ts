@@ -32,6 +32,13 @@ interface ApiColumnUpdate {
   position?: number;
 }
 
+export class ApiError extends Error {
+  constructor(readonly status: number) {
+    super(`درخواست به سرور ناموفق بود (${status}).`);
+    this.name = "ApiError";
+  }
+}
+
 function databaseId(id: string): number {
   const parsedId = Number(id);
   if (!Number.isSafeInteger(parsedId) || parsedId < 1) {
@@ -53,7 +60,7 @@ async function sendRequest(
     headers,
   });
   if (!response.ok) {
-    throw new Error(`درخواست به سرور ناموفق بود (${response.status}).`);
+    throw new ApiError(response.status);
   }
   return response;
 }
