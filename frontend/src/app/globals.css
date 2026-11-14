@@ -905,6 +905,30 @@ button:disabled {
   color: var(--muted);
 }
 
+.board-load-error {
+  width: min(100%, 440px);
+  justify-items: center;
+  gap: 12px;
+}
+
+.board-load-error p {
+  margin: 0;
+  color: #b42332;
+  text-align: center;
+}
+
+.board-load-error .signin-submit {
+  width: 100%;
+}
+
+.board-error {
+  margin: 0;
+  padding: 8px 18px;
+  color: #a42332;
+  background: #fff0f1;
+  text-align: center;
+}
+
 .signin-card {
   display: grid;
   width: min(100%, 390px);

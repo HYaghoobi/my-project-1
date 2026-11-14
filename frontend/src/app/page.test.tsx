@@ -7,20 +7,105 @@ import {
 } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  addCard,
+  deleteCard as removeCard,
+  editCard,
+  initialBoard,
+  moveCard,
+  moveColumn,
+  renameColumn,
+  type Board,
+} from "@/lib/board";
+import {
+  createCard,
+  deleteCard,
+  getBoard,
+  updateCard,
+  updateColumn,
+} from "@/lib/api";
 import Home from "./page";
 
 vi.mock("next/link", () => ({ default: "a" }));
 vi.mock("next/image", () => ({ default: () => null }));
+vi.mock("@/lib/api", () => ({
+  createCard: vi.fn(),
+  deleteCard: vi.fn(),
+  getBoard: vi.fn(),
+  updateCard: vi.fn(),
+  updateColumn: vi.fn(),
+}));
 
 const authSessionKey = "pm-authenticated-user";
+let apiBoard: Board;
+let nextCardId: number;
 
 function renderAuthenticatedHome() {
   window.sessionStorage.setItem(authSessionKey, "user");
   return render(<Home />);
 }
 
+function copyBoard(board: Board): Board {
+  return board.map((column) => ({
+    ...column,
+    cards: column.cards.map((card) => ({ ...card })),
+  }));
+}
+
 beforeEach(() => {
   window.sessionStorage.clear();
+  apiBoard = copyBoard(initialBoard);
+  nextCardId = 0;
+  vi.mocked(getBoard).mockImplementation(async () => copyBoard(apiBoard));
+  vi.mocked(createCard).mockImplementation(async (columnId, title, details) => {
+    apiBoard = addCard(apiBoard, columnId, {
+      id: `new-card-${++nextCardId}`,
+      title,
+      details,
+    });
+  });
+  vi.mocked(deleteCard).mockImplementation(async (cardId) => {
+    apiBoard = removeCard(apiBoard, cardId);
+  });
+  vi.mocked(updateColumn).mockImplementation(async (columnId, update) => {
+    if (update.name !== undefined) {
+      apiBoard = renameColumn(apiBoard, columnId, update.name);
+    }
+    if (update.position !== undefined) {
+      const target = apiBoard[update.position];
+      if (target) apiBoard = moveColumn(apiBoard, columnId, target.id);
+    }
+  });
+  vi.mocked(updateCard).mockImplementation(async (cardId, update) => {
+    const source = apiBoard.find((column) =>
+      column.cards.some((card) => card.id === cardId),
+    );
+    const destination = apiBoard.find(
+      (column) => column.id === (update.columnId ?? source?.id),
+    );
+    if (source && destination && update.position !== undefined) {
+      const targetCards = destination.cards.filter(
+        (card) => card.id !== cardId,
+      );
+      apiBoard = moveCard(
+        apiBoard,
+        cardId,
+        destination.id,
+        targetCards[update.position]?.id,
+      );
+    }
+    const card = apiBoard
+      .flatMap((column) => column.cards)
+      .find((item) => item.id === cardId);
+    if (card && (update.title !== undefined || update.details !== undefined)) {
+      apiBoard = editCard(
+        apiBoard,
+        cardId,
+        update.title ?? card.title,
+        update.details ?? card.details,
+      );
+    }
+  });
 });
 
 afterEach(() => {
@@ -79,10 +164,10 @@ describe("Kanban page integration", () => {
     expect(window.sessionStorage.getItem(authSessionKey)).toBeNull();
   });
 
-  it("renders all six fixed columns", () => {
+  it("renders all six fixed columns", async () => {
     renderAuthenticatedHome();
 
-    expect(screen.getAllByTestId(/^kanban-column-/)).toHaveLength(6);
+    expect(await screen.findAllByTestId(/^kanban-column-/)).toHaveLength(6);
     for (const name of [
       "برای انجام",
       "در حال انجام",
@@ -95,8 +180,9 @@ describe("Kanban page integration", () => {
     }
   });
 
-  it("applies column renames and card edits to the rendered board", () => {
+  it("persists column renames and card edits through the board API", async () => {
     renderAuthenticatedHome();
+    await screen.findByRole("heading", { name: "تختهٔ تیم محصول" });
 
     const todoColumn = screen.getByTestId("kanban-column-todo");
     fireEvent.click(
@@ -109,7 +195,10 @@ describe("Kanban page integration", () => {
     const columnNameForm = columnName.closest("form");
     if (!columnNameForm) throw new Error("Column name form was not rendered.");
     fireEvent.submit(columnNameForm);
-    expect(screen.getByRole("heading", { name: "آماده‌سازی" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "آماده‌سازی" }),
+    ).toBeVisible();
+    expect(updateColumn).toHaveBeenCalledWith("todo", { name: "آماده‌سازی" });
 
     const card = screen.getByTestId("kanban-card-brand-story");
     fireEvent.click(
@@ -128,8 +217,12 @@ describe("Kanban page integration", () => {
     );
 
     expect(
-      within(card).getByRole("heading", { name: "روایت تازه‌شده" }),
+      await within(card).findByRole("heading", { name: "روایت تازه‌شده" }),
     ).toBeVisible();
     expect(within(card).getByText("جزئیات تازه‌شده")).toBeVisible();
+    expect(updateCard).toHaveBeenCalledWith("brand-story", {
+      title: "روایت تازه‌شده",
+      details: "جزئیات تازه‌شده",
+    });
   });
 });

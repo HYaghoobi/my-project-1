@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import {
+  useEffect,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -45,18 +46,20 @@ import {
   type KeyboardEvent,
 } from "react";
 import {
-  addCard,
   countCards,
-  deleteCard,
-  editCard,
-  initialBoard,
   moveColumn,
   moveCard,
-  renameColumn,
   type Board,
   type Card,
   type Column,
 } from "@/lib/board";
+import {
+  createCard,
+  deleteCard,
+  getBoard,
+  updateCard,
+  updateColumn,
+} from "@/lib/api";
 
 const columnDropPrefix = "column-drop:";
 const sortableColumnPrefix = "sortable-column:";
@@ -116,7 +119,9 @@ export default function Home() {
     getAuthSnapshot,
     getServerAuthSnapshot,
   );
-  const [board, setBoard] = useState<Board>(initialBoard);
+  const [board, setBoard] = useState<Board>([]);
+  const [isLoadingBoard, setIsLoadingBoard] = useState(true);
+  const [boardError, setBoardError] = useState<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const [activeColumnId, setActiveColumnId] = useState<string | null>(null);
   const boardStyle: CSSProperties & { "--column-count": number } = {
@@ -133,6 +138,72 @@ export default function Home() {
     .find((card) => card.id === activeCardId);
   const activeColumn = board.find((column) => column.id === activeColumnId);
 
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let isCurrentRequest = true;
+    getBoard()
+      .then((loadedBoard) => {
+        if (isCurrentRequest) {
+          setBoard(loadedBoard);
+          setBoardError(null);
+        }
+      })
+      .catch((error: unknown) => {
+        if (isCurrentRequest) {
+          setBoardError(
+            error instanceof Error
+              ? error.message
+              : "بارگذاری برد از سرور ناموفق بود.",
+          );
+        }
+      })
+      .finally(() => {
+        if (isCurrentRequest) setIsLoadingBoard(false);
+      });
+
+    return () => {
+      isCurrentRequest = false;
+    };
+  }, [isAuthenticated]);
+
+  async function saveBoardChange(change: () => Promise<void>) {
+    setBoardError(null);
+    try {
+      await change();
+      setBoard(await getBoard());
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "ذخیرهٔ تغییر برد ناموفق بود.";
+      setBoardError(message);
+      try {
+        setBoard(await getBoard());
+      } catch (refreshError) {
+        const refreshMessage =
+          refreshError instanceof Error
+            ? refreshError.message
+            : "بارگذاری دوبارهٔ برد ناموفق بود.";
+        setBoardError(`${message} ${refreshMessage}`);
+      }
+    }
+  }
+
+  async function retryBoardLoad() {
+    setIsLoadingBoard(true);
+    setBoardError(null);
+    try {
+      setBoard(await getBoard());
+    } catch (error) {
+      setBoardError(
+        error instanceof Error
+          ? error.message
+          : "بارگذاری برد از سرور ناموفق بود.",
+      );
+    } finally {
+      setIsLoadingBoard(false);
+    }
+  }
+
   function handleSignIn(username: string, password: string): boolean {
     if (username !== "user" || password !== "password") return false;
 
@@ -143,6 +214,9 @@ export default function Home() {
 
   function handleSignOut() {
     window.sessionStorage.removeItem(authSessionKey);
+    setBoard([]);
+    setIsLoadingBoard(true);
+    setBoardError(null);
     window.dispatchEvent(new Event(authChangeEvent));
   }
 
@@ -158,6 +232,25 @@ export default function Home() {
     return <SignInScreen onSignIn={handleSignIn} />;
   }
 
+  if (isLoadingBoard) {
+    return (
+      <div className="auth-loading" role="status">
+        در حال بارگذاری برد...
+      </div>
+    );
+  }
+
+  if (boardError && board.length === 0) {
+    return (
+      <main className="auth-loading board-load-error">
+        <p role="alert">{boardError}</p>
+        <button className="signin-submit" type="button" onClick={retryBoardLoad}>
+          تلاش دوباره
+        </button>
+      </main>
+    );
+  }
+
   function handleDragEnd(event: DragEndEvent) {
     setActiveCardId(null);
     setActiveColumnId(null);
@@ -166,13 +259,17 @@ export default function Home() {
     const overId = String(event.over.id);
     if (event.active.data.current?.type === "column") {
       if (overId.startsWith(sortableColumnPrefix)) {
-        setBoard((currentBoard) =>
-          moveColumn(
-            currentBoard,
-            String(event.active.id).slice(sortableColumnPrefix.length),
-            overId.slice(sortableColumnPrefix.length),
-          ),
+        const columnId = String(event.active.id).slice(
+          sortableColumnPrefix.length,
         );
+        const targetColumnId = overId.slice(sortableColumnPrefix.length);
+        const reorderedBoard = moveColumn(board, columnId, targetColumnId);
+        const position = reorderedBoard.findIndex(
+          (column) => column.id === columnId,
+        );
+        if (position >= 0 && reorderedBoard !== board) {
+          void saveBoardChange(() => updateColumn(columnId, { position }));
+        }
       }
       return;
     }
@@ -189,24 +286,28 @@ export default function Home() {
     )
       ? overId
       : undefined;
-    setBoard((currentBoard) =>
-      moveCard(
-        currentBoard,
-        String(event.active.id),
-        destinationColumn.id,
-        beforeCardId,
-      ),
+    const cardId = String(event.active.id);
+    const reorderedBoard = moveCard(
+      board,
+      cardId,
+      destinationColumn.id,
+      beforeCardId,
     );
+    const position = reorderedBoard
+      .find((column) => column.id === destinationColumn.id)
+      ?.cards.findIndex((card) => card.id === cardId);
+    if (position !== undefined && position >= 0) {
+      void saveBoardChange(() =>
+        updateCard(cardId, {
+          columnId: destinationColumn.id,
+          position,
+        }),
+      );
+    }
   }
 
   function handleAddCard(columnId: string, title: string, details: string) {
-    setBoard((currentBoard) =>
-      addCard(currentBoard, columnId, {
-        id: crypto.randomUUID(),
-        title,
-        details,
-      }),
-    );
+    void saveBoardChange(() => createCard(columnId, title, details));
   }
 
   return (
@@ -256,6 +357,12 @@ export default function Home() {
           </button>
         </div>
       </header>
+
+      {boardError && (
+        <p className="board-error" role="alert">
+          {boardError}
+        </p>
+      )}
 
       <div className="workspace-shell">
         <aside className="sidebar" dir="rtl">
@@ -385,18 +492,16 @@ export default function Home() {
                       column={column}
                       onAddCard={handleAddCard}
                       onEditCard={(cardId, title, details) =>
-                        setBoard((currentBoard) =>
-                          editCard(currentBoard, cardId, title, details),
+                        void saveBoardChange(() =>
+                          updateCard(cardId, { title, details }),
                         )
                       }
                       onDeleteCard={(cardId) =>
-                        setBoard((currentBoard) =>
-                          deleteCard(currentBoard, cardId),
-                        )
+                        void saveBoardChange(() => deleteCard(cardId))
                       }
                       onRename={(name) =>
-                        setBoard((currentBoard) =>
-                          renameColumn(currentBoard, column.id, name),
+                        void saveBoardChange(() =>
+                          updateColumn(column.id, { name }),
                         )
                       }
                     />
@@ -524,7 +629,8 @@ function KanbanColumn({
 
   function saveName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onRename(nameDraft);
+    const trimmedName = nameDraft.trim();
+    if (trimmedName) onRename(trimmedName);
     setIsEditingName(false);
   }
 
