@@ -81,8 +81,16 @@ class MoveCardOperation(BaseModel):
     column_id: int
 
 
+class DeleteCardOperation(BaseModel):
+    type: Literal["delete_card"]
+    card_id: int
+
+
 BoardOperation = Annotated[
-    CreateCardOperation | UpdateCardOperation | MoveCardOperation,
+    CreateCardOperation
+    | UpdateCardOperation
+    | MoveCardOperation
+    | DeleteCardOperation,
     Field(discriminator="type"),
 ]
 

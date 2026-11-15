@@ -29,10 +29,13 @@ def build_chat_messages(
             '{"type":"update_card","card_id":number,"title":"text","details":"text"} '
             "(include title and/or details for updates; details are optional for "
             "card creation), "
-            '{"type":"move_card","card_id":number,"column_id":number}. '
-            "A proposal may contain multiple operations. Use only IDs present in "
-            "the board. Never claim that changes were applied; proposals require "
-            "the user's explicit approval. Current board JSON: "
+            '{"type":"move_card","card_id":number,"column_id":number}, or '
+            '{"type":"delete_card","card_id":number}. '
+            "Use delete_card when the user asks to delete a card; never simulate "
+            "deletion by editing its title or details. A proposal may contain "
+            "multiple operations. Use only IDs present in the board. Never claim "
+            "that changes were applied; proposals require the user's explicit "
+            "approval. Current board JSON: "
             f"{board_json}"
         ),
     }

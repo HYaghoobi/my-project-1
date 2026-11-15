@@ -49,6 +49,10 @@ export type ChatOperation =
       type: "move_card";
       card_id: number;
       column_id: number;
+    }
+  | {
+      type: "delete_card";
+      card_id: number;
     };
 
 export interface ChatProposal {

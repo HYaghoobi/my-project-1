@@ -451,10 +451,85 @@ test("shows the assistant and refreshes the board after approving a proposal", a
   await expect(page.getByText("این یک پیشنهاد آزمایشی است.")).toBeVisible();
   await expect(getCard(page, "کارت پیشنهادی هوش مصنوعی")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "تأیید و اعمال" }).click();
+  await page
+    .locator(".assistant-proposal")
+    .last()
+    .getByRole("button", { name: "تأیید و اعمال" })
+    .click();
 
   await expect(getCard(page, "کارت پیشنهادی هوش مصنوعی")).toBeVisible();
-  await expect(page.getByText("اعمال شد")).toBeVisible();
+  await expect(
+    page.locator(".assistant-proposal").last().getByText("اعمال شد"),
+  ).toBeVisible();
+});
+
+test("deletes a card after approving the assistant proposal", async ({ page }) => {
+  await signIn(page);
+  const boardResponse = await page.request.get(
+    new URL("/api/board", page.url()).toString(),
+    { headers: { Authorization: apiAuthorization } },
+  );
+  expect(boardResponse.ok()).toBeTruthy();
+  const originalBoard = await boardResponse.json();
+  const targetColumn = originalBoard.columns.find(
+    (column: { cards: unknown[] }) => column.cards.length > 0,
+  );
+  if (!targetColumn) throw new Error("Unable to find a card to delete");
+  const targetCard = targetColumn.cards[0];
+  const updatedBoard = structuredClone(originalBoard);
+  const updatedColumn = updatedBoard.columns.find(
+    (column: { id: number }) => column.id === targetColumn.id,
+  );
+  updatedColumn.cards = updatedColumn.cards.filter(
+    (card: { id: number }) => card.id !== targetCard.id,
+  );
+  const proposalId = 987653;
+
+  await page.route("**/api/chat", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        json: {
+          message: "کارت حذف می‌شود.",
+          proposal: {
+            id: proposalId,
+            status: "pending",
+            operations: [{ type: "delete_card", card_id: targetCard.id }],
+          },
+        },
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route(
+    `**/api/chat/proposals/${proposalId}/apply`,
+    (route) => route.fulfill({ status: 200, json: updatedBoard }),
+  );
+
+  await page.getByTestId("assistant-launcher").click();
+  await page
+    .getByRole("textbox", { name: "پیامتان را بنویسید..." })
+    .fill(`کارت ${targetCard.title} را حذف کن.`);
+  await page.getByRole("button", { name: "ارسال پیام" }).click();
+  await expect(
+    page
+      .locator(".assistant-proposal")
+      .last()
+      .getByText(`حذف کارت «${targetCard.title}»`),
+  ).toBeVisible();
+  await expect(getCard(page, targetCard.title)).toBeVisible();
+
+  await page
+    .locator(".assistant-proposal")
+    .last()
+    .getByRole("button", { name: "تأیید و اعمال" })
+    .click();
+
+  await expect(getCard(page, targetCard.title)).toHaveCount(0);
+  await expect(
+    page.locator(".assistant-proposal").last().getByText("اعمال شد"),
+  ).toBeVisible();
 });
 
 test("rejects an assistant proposal without changing the board", async ({
@@ -516,9 +591,15 @@ test("rejects an assistant proposal without changing the board", async ({
     .fill("یک پیشنهاد آزمایشی بده.");
   await page.getByRole("button", { name: "ارسال پیام" }).click();
   await expect(page.getByText("پیشنهاد ردشدنی برای آزمون.")).toBeVisible();
-  await page.getByRole("button", { name: "رد پیشنهاد" }).click();
+  await page
+    .locator(".assistant-proposal")
+    .last()
+    .getByRole("button", { name: "رد پیشنهاد" })
+    .click();
 
-  await expect(page.getByText("رد شد")).toBeVisible();
+  await expect(
+    page.locator(".assistant-proposal").last().getByText("رد شد"),
+  ).toBeVisible();
   await expect(getCard(page, "کارت نباید ساخته شود")).toHaveCount(0);
   await expect(page.getByTestId("card-count")).toHaveText("9");
 });

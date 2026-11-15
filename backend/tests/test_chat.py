@@ -90,6 +90,7 @@ def test_chat_sends_board_and_full_history_and_requires_approval(
             "content": "Create, update, and move cards",
         }
         assert '"columns"' in sent_messages[0][0]["content"]
+        assert '"type":"delete_card"' in sent_messages[0][0]["content"]
         assert '"New card"' not in sent_messages[0][0]["content"]
         assert sent_messages[1][-1]["content"] == "Can you explain that?"
         assert sent_messages[1][1]["role"] == "user"
@@ -153,6 +154,19 @@ def test_chat_sends_board_and_full_history_and_requires_approval(
                 },
             }
         ),
+        json.dumps(
+            {
+                "message": "Delete an unknown card",
+                "proposal": {
+                    "operations": [
+                        {
+                            "type": "delete_card",
+                            "card_id": 999999,
+                        }
+                    ]
+                },
+            }
+        ),
     ],
 )
 def test_invalid_completion_is_rejected_without_changing_board_or_history(
@@ -176,6 +190,65 @@ def test_invalid_completion_is_rejected_without_changing_board_or_history(
     assert response.status_code == 502
     assert client.get("/api/board", auth=DEMO_AUTH).json() == original_board
     assert client.get("/api/chat", auth=DEMO_AUTH).json()["messages"] == []
+
+
+def test_applying_delete_card_proposal_removes_card_and_reorders_column(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    original_board = client.get("/api/board", auth=DEMO_AUTH).json()
+    original_column = max(
+        original_board["columns"], key=lambda item: len(item["cards"])
+    )
+    assert original_column["cards"]
+    deleted_card_id = original_column["cards"][0]["id"]
+
+    async def fake_completion(messages: list[ChatMessage]) -> str:
+        assert messages[-1]["content"] == "Delete the card"
+        return json.dumps(
+            {
+                "message": "I suggest deleting this card.",
+                "proposal": {
+                    "operations": [
+                        {
+                            "type": "delete_card",
+                            "card_id": deleted_card_id,
+                        }
+                    ]
+                },
+            }
+        )
+
+    monkeypatch.setattr("app.assistant.complete_chat", fake_completion)
+
+    response = client.post(
+        "/api/chat",
+        auth=DEMO_AUTH,
+        json={"message": "Delete the card"},
+    )
+    assert response.status_code == 200
+    proposal_id = response.json()["proposal"]["id"]
+    assert response.json()["proposal"]["operations"] == [
+        {"type": "delete_card", "card_id": deleted_card_id}
+    ]
+    assert client.get("/api/board", auth=DEMO_AUTH).json() == original_board
+
+    applied = client.post(
+        f"/api/chat/proposals/{proposal_id}/apply",
+        auth=DEMO_AUTH,
+    )
+
+    assert applied.status_code == 200
+    updated_board = applied.json()
+    updated_column = next(
+        column
+        for column in updated_board["columns"]
+        if column["id"] == original_column["id"]
+    )
+    assert all(card["id"] != deleted_card_id for card in updated_column["cards"])
+    assert [card["position"] for card in updated_column["cards"]] == list(
+        range(len(updated_column["cards"]))
+    )
 
 
 def test_chat_requires_authentication_and_non_blank_message(client: TestClient) -> None:

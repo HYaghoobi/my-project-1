@@ -30,6 +30,7 @@ from .schemas import (
     ColumnResponse,
     ColumnUpdate,
     CreateCardOperation,
+    DeleteCardOperation,
     MoveCardOperation,
     UpdateCardOperation,
 )
@@ -130,6 +131,25 @@ def _reorder_positions(
     )
 
 
+def _delete_owned_card(
+    connection: sqlite3.Connection, card_id: int, user_id: int
+) -> None:
+    card = _owned_card(connection, card_id, user_id)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    column_id = int(card["column_id"])
+    remaining_ids = [
+        int(row["id"])
+        for row in connection.execute(
+            "SELECT id FROM cards WHERE column_id = ? AND id != ? ORDER BY position",
+            (column_id, card_id),
+        ).fetchall()
+    ]
+    connection.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+    _reorder_positions(connection, "cards", "column_id", column_id, remaining_ids)
+
+
 def _column_response(
     connection: sqlite3.Connection, column: sqlite3.Row
 ) -> ColumnResponse:
@@ -197,6 +217,11 @@ def _validate_proposal(
             if operation.card_id not in cards or operation.column_id not in columns:
                 raise InvalidAssistantResponseError(
                     "The proposal references an item outside the current board."
+                )
+        elif isinstance(operation, DeleteCardOperation):
+            if operation.card_id not in cards:
+                raise InvalidAssistantResponseError(
+                    "The proposal references a card outside the current board."
                 )
 
 
@@ -456,6 +481,8 @@ def apply_chat_proposal(
                 _reorder_positions(
                     connection, "cards", "column_id", operation.column_id, target_ids
                 )
+            elif isinstance(operation, DeleteCardOperation):
+                _delete_owned_card(connection, operation.card_id, user_id)
     return _load_board(connection, user_id)
 
 
@@ -725,19 +752,6 @@ def delete_card(
     connection: DatabaseConnection,
     user_id: AuthenticatedUserId,
 ) -> Response:
-    card = _owned_card(connection, card_id, user_id)
-    if card is None:
-        raise HTTPException(status_code=404, detail="Card not found")
-
-    column_id = int(card["column_id"])
-    card_ids = [
-        int(row["id"])
-        for row in connection.execute(
-            "SELECT id FROM cards WHERE column_id = ? AND id != ? ORDER BY position",
-            (column_id, card_id),
-        ).fetchall()
-    ]
     with connection:
-        connection.execute("DELETE FROM cards WHERE id = ?", (card_id,))
-        _reorder_positions(connection, "cards", "column_id", column_id, card_ids)
+        _delete_owned_card(connection, card_id, user_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

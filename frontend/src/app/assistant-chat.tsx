@@ -70,6 +70,12 @@ function operationDescription(
       originalTitle,
     );
   }
+  if (operation.type === "delete_card") {
+    return translate(locale, "assistantDeleteCard").replace(
+      "{title}",
+      cardTitle(operation.card_id),
+    );
+  }
   return translate(locale, "assistantMoveCard")
     .replace("{title}", cardTitle(operation.card_id))
     .replace("{column}", columnName(operation.column_id));
