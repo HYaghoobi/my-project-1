@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: my-project-1
+    runtime: docker
+    plan: 0.5c-512mb
+    region: frankfurt
+    healthCheckPath: /api/health
+    envVars:
+      - key: PM_DATABASE_PATH
+        value: /var/data/pm.sqlite3
+      - key: OPENROUTER_API_KEY
+        sync: false
+    disk:
+      name: kanban-data
+      mountPath: /var/data
+      sizeGB: 1

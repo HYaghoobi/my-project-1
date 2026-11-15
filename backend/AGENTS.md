@@ -9,4 +9,4 @@
 - `app/schemas.py` defines API request, response, and card-operation models.
 - `tests/` contains backend API, chat, OpenRouter, and persistence tests; run them with `uv run --extra dev pytest`.
 - `static/index.html` is the temporary Hello World page used to validate the Docker scaffold.
-- The root `Dockerfile` installs the backend dependencies and runs Uvicorn on port `8000`.
+- The root `Dockerfile` installs the backend dependencies and runs Uvicorn on `PORT`, defaulting to `8000`.
