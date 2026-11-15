@@ -66,6 +66,23 @@ CREATE TABLE IF NOT EXISTS cards (
     position INTEGER NOT NULL CHECK (position >= 0),
     UNIQUE (column_id, position)
 );
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chat_proposals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_id INTEGER NOT NULL UNIQUE REFERENCES chat_messages(id) ON DELETE CASCADE,
+    operations_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'applied', 'rejected'))
+);
 """
 
 
@@ -115,9 +132,31 @@ def connect_database(path: Path) -> sqlite3.Connection:
 def initialize_database(path: Path) -> None:
     connection = connect_database(path)
     try:
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
         with connection:
             connection.executescript(SCHEMA)
-            connection.execute("PRAGMA user_version = 1")
+            if version == 2:
+                connection.execute(
+                    "CREATE TABLE chat_proposals_v3 ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+                    "message_id INTEGER NOT NULL UNIQUE REFERENCES "
+                    "chat_messages(id) ON DELETE CASCADE, "
+                    "operations_json TEXT NOT NULL, "
+                    "status TEXT NOT NULL DEFAULT 'pending' "
+                    "CHECK (status IN ('pending', 'applied', 'rejected')))"
+                )
+                connection.execute(
+                    "INSERT INTO chat_proposals_v3 "
+                    "(id, user_id, message_id, operations_json, status) "
+                    "SELECT id, user_id, message_id, operations_json, status "
+                    "FROM chat_proposals"
+                )
+                connection.execute("DROP TABLE chat_proposals")
+                connection.execute(
+                    "ALTER TABLE chat_proposals_v3 RENAME TO chat_proposals"
+                )
+            connection.execute("PRAGMA user_version = 3")
             user = connection.execute(
                 "SELECT id FROM users WHERE username = ?",
                 (DEMO_USERNAME,),

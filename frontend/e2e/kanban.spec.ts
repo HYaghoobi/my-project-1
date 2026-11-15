@@ -386,3 +386,139 @@ test("keeps the columns horizontally scrollable on a small screen", async ({
 
   expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
 });
+
+test("shows the assistant and refreshes the board after approving a proposal", async ({
+  page,
+}) => {
+  await signIn(page);
+  const boardResponse = await page.request.get(
+    new URL("/api/board", page.url()).toString(),
+    { headers: { Authorization: apiAuthorization } },
+  );
+  expect(boardResponse.ok()).toBeTruthy();
+  const updatedBoard = await boardResponse.json();
+  const todoColumn = updatedBoard.columns.find(
+    (column: { name: string }) => column.name === "برای انجام",
+  );
+  if (!todoColumn) throw new Error("Unable to find the todo column");
+  const proposalId = 987654;
+  const cardId = 987655;
+  updatedBoard.columns.find(
+    (column: { id: number }) => column.id === todoColumn.id,
+  ).cards.push({
+    id: cardId,
+    title: "کارت پیشنهادی هوش مصنوعی",
+    details: "کارت پس از تأیید اضافه شد.",
+    position: todoColumn.cards.length,
+  });
+
+  await page.route("**/api/chat", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        json: {
+          message: "این یک پیشنهاد آزمایشی است.",
+          proposal: {
+            id: proposalId,
+            status: "pending",
+            operations: [
+              {
+                type: "create_card",
+                column_id: todoColumn.id,
+                title: "کارت پیشنهادی هوش مصنوعی",
+                details: "کارت پس از تأیید اضافه شد.",
+              },
+            ],
+          },
+        },
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route(
+    `**/api/chat/proposals/${proposalId}/apply`,
+    (route) => route.fulfill({ status: 200, json: updatedBoard }),
+  );
+
+  const launcher = page.getByTestId("assistant-launcher");
+  await expect(launcher).toBeVisible();
+  await launcher.click();
+  await page
+    .getByRole("textbox", { name: "پیامتان را بنویسید..." })
+    .fill("یک کارت آزمایشی ایجاد کن.");
+  await page.getByRole("button", { name: "ارسال پیام" }).click();
+  await expect(page.getByText("این یک پیشنهاد آزمایشی است.")).toBeVisible();
+  await expect(getCard(page, "کارت پیشنهادی هوش مصنوعی")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "تأیید و اعمال" }).click();
+
+  await expect(getCard(page, "کارت پیشنهادی هوش مصنوعی")).toBeVisible();
+  await expect(page.getByText("اعمال شد")).toBeVisible();
+});
+
+test("rejects an assistant proposal without changing the board", async ({
+  page,
+}) => {
+  await signIn(page);
+  const boardResponse = await page.request.get(
+    new URL("/api/board", page.url()).toString(),
+    { headers: { Authorization: apiAuthorization } },
+  );
+  expect(boardResponse.ok()).toBeTruthy();
+  const board = await boardResponse.json();
+  const todoColumn = board.columns.find(
+    (column: { name: string }) => column.name === "برای انجام",
+  );
+  if (!todoColumn) throw new Error("Unable to find the todo column");
+  const proposalId = 987656;
+
+  await page.route("**/api/chat", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 200,
+        json: {
+          message: "پیشنهاد ردشدنی برای آزمون.",
+          proposal: {
+            id: proposalId,
+            status: "pending",
+            operations: [
+              {
+                type: "create_card",
+                column_id: todoColumn.id,
+                title: "کارت نباید ساخته شود",
+                details: "",
+              },
+            ],
+          },
+        },
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.route(
+    `**/api/chat/proposals/${proposalId}/reject`,
+    (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          id: proposalId,
+          status: "rejected",
+          operations: [],
+        },
+      }),
+  );
+
+  await page.getByTestId("assistant-launcher").click();
+  await page
+    .getByRole("textbox", { name: "پیامتان را بنویسید..." })
+    .fill("یک پیشنهاد آزمایشی بده.");
+  await page.getByRole("button", { name: "ارسال پیام" }).click();
+  await expect(page.getByText("پیشنهاد ردشدنی برای آزمون.")).toBeVisible();
+  await page.getByRole("button", { name: "رد پیشنهاد" }).click();
+
+  await expect(page.getByText("رد شد")).toBeVisible();
+  await expect(getCard(page, "کارت نباید ساخته شود")).toHaveCount(0);
+  await expect(page.getByTestId("card-count")).toHaveText("9");
+});

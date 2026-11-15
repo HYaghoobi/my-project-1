@@ -18,10 +18,14 @@ import {
   type Board,
 } from "@/lib/board";
 import {
+  applyChatProposal,
   ApiError,
   createCard,
   deleteCard,
+  getChatHistory,
   getBoard,
+  rejectChatProposal,
+  sendChatMessage,
   updateCard,
   updateColumn,
 } from "@/lib/api";
@@ -35,9 +39,13 @@ vi.mock("@/lib/api", () => ({
       super(`Request failed (${status}).`);
     }
   },
+  applyChatProposal: vi.fn(),
   createCard: vi.fn(),
   deleteCard: vi.fn(),
+  getChatHistory: vi.fn(),
   getBoard: vi.fn(),
+  rejectChatProposal: vi.fn(),
+  sendChatMessage: vi.fn(),
   updateCard: vi.fn(),
   updateColumn: vi.fn(),
 }));
@@ -68,6 +76,17 @@ beforeEach(() => {
   delete document.documentElement.dataset.theme;
   apiBoard = copyBoard(initialBoard);
   nextCardId = 0;
+  vi.mocked(getChatHistory).mockResolvedValue([]);
+  vi.mocked(sendChatMessage).mockResolvedValue({
+    message: "پاسخ دستیار",
+    proposal: null,
+  });
+  vi.mocked(applyChatProposal).mockResolvedValue(copyBoard(apiBoard));
+  vi.mocked(rejectChatProposal).mockImplementation(async (id) => ({
+    id,
+    operations: [],
+    status: "rejected",
+  }));
   vi.mocked(getBoard).mockImplementation(async () => copyBoard(apiBoard));
   vi.mocked(createCard).mockImplementation(async (columnId, title, details) => {
     apiBoard = addCard(apiBoard, columnId, {
@@ -278,5 +297,102 @@ describe("Kanban page integration", () => {
       title: "روایت تازه‌شده",
       details: "جزئیات تازه‌شده",
     });
+  });
+
+  it("sends a chat message and renders the assistant reply", async () => {
+    renderAuthenticatedHome();
+    await screen.findByRole("heading", { name: "تختهٔ تیم محصول" });
+    fireEvent.click(screen.getByTestId("assistant-launcher"));
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "پیامتان را بنویسید..." }),
+      { target: { value: "لطفاً یک کارت بساز" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "ارسال پیام" }));
+
+    expect(await screen.findByText("پاسخ دستیار")).toBeVisible();
+    expect(screen.getByText("لطفاً یک کارت بساز")).toBeVisible();
+    expect(sendChatMessage).toHaveBeenCalledWith("لطفاً یک کارت بساز");
+  });
+
+  it("applies a proposal only after explicit approval and refreshes the board", async () => {
+    const proposal = {
+      id: 42,
+      status: "pending" as const,
+      operations: [
+        {
+          type: "create_card" as const,
+          column_id: 1,
+          title: "کارت پیشنهادی",
+          details: "جزئیات پیشنهادی",
+        },
+      ],
+    };
+    vi.mocked(getChatHistory).mockResolvedValue([
+      {
+        id: 8,
+        role: "assistant",
+        content: "این پیشنهاد را بررسی کنید.",
+        proposal,
+      },
+    ]);
+    vi.mocked(applyChatProposal).mockImplementation(async () => {
+      apiBoard = addCard(apiBoard, "todo", {
+        id: "ai-card",
+        title: "کارت پیشنهادی",
+        details: "جزئیات پیشنهادی",
+      });
+      return copyBoard(apiBoard);
+    });
+    renderAuthenticatedHome();
+    await screen.findByRole("heading", { name: "تختهٔ تیم محصول" });
+    fireEvent.click(screen.getByTestId("assistant-launcher"));
+    await screen.findByText("این پیشنهاد را بررسی کنید.");
+
+    expect(screen.queryByTestId("kanban-card-ai-card")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "تأیید و اعمال" }));
+
+    expect(await screen.findByTestId("kanban-card-ai-card")).toBeVisible();
+    expect(screen.getByText("اعمال شد")).toBeVisible();
+    expect(applyChatProposal).toHaveBeenCalledWith(42);
+  });
+
+  it("rejects a proposal without changing the board", async () => {
+    const proposal = {
+      id: 43,
+      status: "pending" as const,
+      operations: [
+        {
+          type: "create_card" as const,
+          column_id: 1,
+          title: "کارت ردشده",
+          details: "",
+        },
+      ],
+    };
+    vi.mocked(getChatHistory).mockResolvedValue([
+      {
+        id: 9,
+        role: "assistant",
+        content: "پیشنهاد آزمایشی",
+        proposal,
+      },
+    ]);
+    const originalCardCount = apiBoard.flatMap((column) => column.cards).length;
+    renderAuthenticatedHome();
+    await screen.findByRole("heading", { name: "تختهٔ تیم محصول" });
+    fireEvent.click(screen.getByTestId("assistant-launcher"));
+    await screen.findByText("پیشنهاد آزمایشی");
+    fireEvent.click(screen.getByRole("button", { name: "رد پیشنهاد" }));
+
+    expect(await screen.findByText("رد شد")).toBeVisible();
+    expect(rejectChatProposal).toHaveBeenCalledWith(43);
+    expect(applyChatProposal).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("heading", { name: "کارت ردشده" }),
+    ).not.toBeInTheDocument();
+    expect(apiBoard.flatMap((column) => column.cards)).toHaveLength(
+      originalCardCount,
+    );
   });
 });

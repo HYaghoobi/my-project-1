@@ -32,6 +32,43 @@ interface ApiColumnUpdate {
   position?: number;
 }
 
+export type ChatOperation =
+  | {
+      type: "create_card";
+      column_id: number;
+      title: string;
+      details: string;
+    }
+  | {
+      type: "update_card";
+      card_id: number;
+      title?: string | null;
+      details?: string | null;
+    }
+  | {
+      type: "move_card";
+      card_id: number;
+      column_id: number;
+    };
+
+export interface ChatProposal {
+  id: number;
+  operations: ChatOperation[];
+  status: "pending" | "applied" | "rejected";
+}
+
+export interface ChatMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  proposal?: ChatProposal | null;
+}
+
+export interface ChatReply {
+  message: string;
+  proposal: ChatProposal | null;
+}
+
 export class ApiError extends Error {
   constructor(readonly status: number) {
     super(`درخواست به سرور ناموفق بود (${status}).`);
@@ -131,5 +168,33 @@ export async function updateCard(
 export async function deleteCard(cardId: string): Promise<void> {
   await sendRequest(`/cards/${databaseId(cardId)}`, {
     method: "DELETE",
+  });
+}
+
+export async function getChatHistory(): Promise<ChatMessage[]> {
+  const history = await requestJson<{ messages: ChatMessage[] }>("/chat");
+  return history.messages;
+}
+
+export async function sendChatMessage(message: string): Promise<ChatReply> {
+  return requestJson<ChatReply>("/chat", {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+}
+
+export async function applyChatProposal(proposalId: number): Promise<Board> {
+  const board = await requestJson<ApiBoard>(
+    `/chat/proposals/${proposalId}/apply`,
+    { method: "POST" },
+  );
+  return toBoard(board);
+}
+
+export async function rejectChatProposal(
+  proposalId: number,
+): Promise<ChatProposal> {
+  return requestJson<ChatProposal>(`/chat/proposals/${proposalId}/reject`, {
+    method: "POST",
   });
 }

@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getBoard, updateCard } from "./api";
+import {
+  applyChatProposal,
+  getBoard,
+  getChatHistory,
+  rejectChatProposal,
+  sendChatMessage,
+  updateCard,
+} from "./api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -80,5 +87,69 @@ describe("board API client", () => {
     );
 
     await expect(getBoard()).rejects.toThrow("500");
+  });
+
+  it("uses the chat endpoints and maps the approved board response", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ messages: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          message: "I suggest a card.",
+          proposal: { id: 21, operations: [], status: "pending" },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 8,
+          name: "Team board",
+          columns: [
+            {
+              id: 12,
+              name: "Todo",
+              position: 0,
+              cards: [],
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 21,
+          operations: [],
+          status: "rejected",
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getChatHistory()).resolves.toEqual([]);
+    await expect(sendChatMessage("Create a card")).resolves.toEqual({
+      message: "I suggest a card.",
+      proposal: { id: 21, operations: [], status: "pending" },
+    });
+    await expect(applyChatProposal(21)).resolves.toEqual([
+      { id: "12", name: "Todo", cards: [] },
+    ]);
+    await expect(rejectChatProposal(21)).resolves.toEqual({
+      id: 21,
+      operations: [],
+      status: "rejected",
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/chat",
+      "/api/chat",
+      "/api/chat/proposals/21/apply",
+      "/api/chat/proposals/21/reject",
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({
+      message: "Create a card",
+    });
   });
 });

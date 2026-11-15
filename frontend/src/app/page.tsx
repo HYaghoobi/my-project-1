@@ -71,6 +71,7 @@ import {
   type Theme,
   type TranslationKey,
 } from "@/lib/i18n";
+import AssistantChat from "./assistant-chat";
 
 const columnDropPrefix = "column-drop:";
 const sortableColumnPrefix = "sortable-column:";
@@ -614,6 +615,11 @@ export default function Home() {
           </section>
         </main>
       </div>
+      <AssistantChat
+        board={board}
+        locale={locale}
+        onBoardUpdated={setBoard}
+      />
     </div>
   );
 }
